@@ -1,0 +1,8 @@
+config.json
+tt-trigger.pid
+logs/
+windows/tt-trigger-server.exe
+dist/
+*.log
+__pycache__/
+*.pyc

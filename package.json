@@ -1,0 +1,9 @@
+{
+  "name": "tt-trigger-extension-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:extension": "node --test tests/extension.test.mjs",
+    "check:extension": "node scripts/check-extension.mjs"
+  }
+}

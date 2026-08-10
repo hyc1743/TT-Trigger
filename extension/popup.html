@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TT Trigger</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main>
+    <header>
+      <div class="mark" aria-hidden="true">TT</div>
+      <div>
+        <h1>Trigger</h1>
+        <p>taoli.tools 页面触发器</p>
+      </div>
+    </header>
+
+    <section class="status-panel" aria-live="polite">
+      <div class="status-line">
+        <span id="status-indicator" class="indicator"></span>
+        <strong id="status-label">正在读取状态</strong>
+      </div>
+      <p id="status-message">请稍候</p>
+    </section>
+
+    <dl>
+      <div>
+        <dt>本机服务</dt>
+        <dd id="relay-url">—</dd>
+      </div>
+      <div>
+        <dt>目标页面</dt>
+        <dd>https://taoli.tools/*</dd>
+      </div>
+    </dl>
+
+    <div class="actions">
+      <button id="reconnect" type="button">重新连接</button>
+      <button id="open-options" type="button" class="primary">设置</button>
+    </div>
+  </main>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
