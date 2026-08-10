@@ -77,7 +77,7 @@ type Server struct {
 	cfg           Config
 	logger        *log.Logger
 	extensionHTTP *http.Server
-	apiHTTP       *http.Server
+	apiHTTP       []*http.Server
 	upgrader      websocket.Upgrader
 
 	mu        sync.Mutex
@@ -119,30 +119,42 @@ func NewServer(cfg Config, logger *log.Logger) *Server {
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
-	s.apiHTTP = &http.Server{
+	s.apiHTTP = append(s.apiHTTP, &http.Server{
 		Addr:              cfg.APIListen,
 		Handler:           s.securityHeaders(apiMux),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
+	})
+	if cfg.AdditionalAPIListen != "" {
+		s.apiHTTP = append(s.apiHTTP, &http.Server{
+			Addr:              cfg.AdditionalAPIListen,
+			Handler:           s.securityHeaders(apiMux),
+			ReadHeaderTimeout: 5 * time.Second,
+			IdleTimeout:       60 * time.Second,
+		})
 	}
 	return s
 }
 
 func (s *Server) ExtensionHandler() http.Handler { return s.extensionHTTP.Handler }
-func (s *Server) APIHandler() http.Handler       { return s.apiHTTP.Handler }
+func (s *Server) APIHandler() http.Handler       { return s.apiHTTP[0].Handler }
 
 func (s *Server) ListenAndServe() error {
 	s.logger.Printf("extension relay listening on %s", s.cfg.ExtensionListen)
-	s.logger.Printf("Tailscale API origin listening on %s", s.cfg.APIListen)
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 1+len(s.apiHTTP))
 	go func() { errCh <- s.extensionHTTP.ListenAndServe() }()
-	go func() { errCh <- s.apiHTTP.ListenAndServe() }()
+	for _, apiServer := range s.apiHTTP {
+		s.logger.Printf("trigger API listening on %s", apiServer.Addr)
+		go func(server *http.Server) { errCh <- server.ListenAndServe() }(apiServer)
+	}
 	err := <-errCh
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
 	_ = s.extensionHTTP.Close()
-	_ = s.apiHTTP.Close()
+	for _, apiServer := range s.apiHTTP {
+		_ = apiServer.Close()
+	}
 	return err
 }
 
@@ -155,8 +167,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 		conn.close(websocket.CloseGoingAway, "server shutdown")
 	}
 	extensionErr := s.extensionHTTP.Shutdown(ctx)
-	apiErr := s.apiHTTP.Shutdown(ctx)
-	return errors.Join(extensionErr, apiErr)
+	errs := []error{extensionErr}
+	for _, apiServer := range s.apiHTTP {
+		errs = append(errs, apiServer.Shutdown(ctx))
+	}
+	return errors.Join(errs...)
 }
 
 func (s *Server) securityHeaders(next http.Handler) http.Handler {
@@ -470,5 +485,9 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 }
 
 func (s *Server) String() string {
-	return fmt.Sprintf("TT-Trigger(extension=%s, api=%s)", s.cfg.ExtensionListen, s.cfg.APIListen)
+	addresses := []string{s.cfg.APIListen}
+	if s.cfg.AdditionalAPIListen != "" {
+		addresses = append(addresses, s.cfg.AdditionalAPIListen)
+	}
+	return fmt.Sprintf("TT-Trigger(extension=%s, api=%s)", s.cfg.ExtensionListen, strings.Join(addresses, ","))
 }

@@ -74,6 +74,7 @@ set /p TT_PID=<"tt-trigger.pid"
 
 echo TT-Trigger started. PID: %TT_PID%
 echo Local extension relay: ws://127.0.0.1:8787/extension
+echo Local API: http://127.0.0.1:8788
 echo Tailscale API: http://%TAILSCALE_IP%:8788
 echo URL example: http://%TAILSCALE_IP%:8788/trigger?token=YOUR_TOKEN^&symbol=BTC
 echo Logs:    %CD%\logs

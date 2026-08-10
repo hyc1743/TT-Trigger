@@ -19,11 +19,12 @@ const (
 )
 
 type Config struct {
-	ExtensionListen  string `json:"extension_listen"`
-	APIListen        string `json:"api_listen"`
-	Token            string `json:"token"`
-	TriggerTimeoutMS int    `json:"trigger_timeout_ms"`
-	LegacyListen     string `json:"listen,omitempty"`
+	ExtensionListen     string `json:"extension_listen"`
+	APIListen           string `json:"api_listen"`
+	Token               string `json:"token"`
+	TriggerTimeoutMS    int    `json:"trigger_timeout_ms"`
+	LegacyListen        string `json:"listen,omitempty"`
+	AdditionalAPIListen string `json:"-"`
 }
 
 func DefaultConfig() (Config, error) {
@@ -104,6 +105,14 @@ func (c Config) Validate() error {
 	}
 	if c.ExtensionListen == c.APIListen {
 		return errors.New("extension_listen and api_listen must use different addresses")
+	}
+	if strings.TrimSpace(c.AdditionalAPIListen) != "" {
+		if err := validateAPIListen(c.AdditionalAPIListen); err != nil {
+			return fmt.Errorf("additional API listen address: %w", err)
+		}
+		if c.AdditionalAPIListen == c.APIListen || c.AdditionalAPIListen == c.ExtensionListen {
+			return errors.New("additional API listen address must be unique")
+		}
 	}
 	if len(c.Token) < 32 {
 		return errors.New("token must contain at least 32 characters")

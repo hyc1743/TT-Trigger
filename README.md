@@ -6,7 +6,7 @@ TT-Trigger 由一个 Chrome Manifest V3 插件和一个轻量 Windows Webhook �
 
 1. Chrome 插件通过本机 `ws://127.0.0.1:8787/extension` 与服务保持连接。
 2. `start.bat` 通过 `tailscale ip -4` 自动读取本机 Tailscale IPv4 地址。
-3. 触发 API 只监听该 Tailscale IP 的 8788 端口，不监听公网或局域网网卡。
+3. 触发 API 同时监听 `127.0.0.1:8788` 和该 Tailscale IP 的 8788 端口，不监听公网或局域网网卡。
 4. 服务把触发内容发送给插件，并等待页面执行结果后再响应调用方。
 5. 插件只操作最近获得焦点的 Chrome 窗口中的活动标签页，不会操作后台标签页或其他域名。
 
@@ -54,14 +54,14 @@ tailscale status
 4. 点击插件图标，直接在插件弹窗中粘贴 Token，然后点击“保存并连接”。
 5. 插件弹窗显示“已连接”后即可调用 Webhook。
 
-`TT-Trigger-Chrome-2.1.0.zip` 是插件源码压缩包；Chrome 开发者模式仍需先解压再加载。
+`TT-Trigger-Chrome-2.1.1.zip` 是插件源码压缩包；Chrome 开发者模式仍需先解压再加载。
 
 ### 4. 网络要求
 
 - 不需要开放 Windows 防火墙端口。
 - 不需要配置云服务器安全组或公网端口映射。
 - `8787` 只监听 Windows 本机回环地址。
-- `8788` 只监听自动获取的 Tailscale `100.x` 地址。
+- `8788` 同时监听本机 `127.0.0.1` 和自动获取的 Tailscale `100.x` 地址。
 - 调用设备必须登录同一 Tailscale tailnet，并被 tailnet ACL 允许访问该设备。
 
 ## 使用 URL 直接调用
@@ -92,6 +92,12 @@ http://TAILSCALE_IP:8788/trigger?token=YOUR_TOKEN&symbol=BG-P%3ASIREN%2FUSDT%2BO
 
 ```bat
 tailscale ip -4
+```
+
+同一台 Windows 机器也可以直接使用本机地址：
+
+```text
+http://127.0.0.1:8788/trigger?token=YOUR_TOKEN&symbol=BTC
 ```
 
 成功响应：
@@ -168,7 +174,7 @@ curl -X POST 'http://TAILSCALE_IP:8788/webhook' \
 ```
 
 - `extension_listen`：Chrome 插件的本机 WebSocket 地址，只允许回环地址。
-- `api_listen`：直接运行 EXE 时的安全回环默认值；`start.bat` 会自动用当前 Tailscale IP 覆盖它。
+- `api_listen`：本机 API 地址，默认监听 `127.0.0.1:8788`；`start.bat` 会额外增加当前 Tailscale IP 监听地址。
 - `token`：至少 32 个字符，Webhook 与插件使用同一个值。
 - `trigger_timeout_ms`：等待插件结果的时间，范围 250–60000 毫秒。
 
@@ -187,7 +193,7 @@ windows\build-windows.bat
 在 Linux/macOS 上生成完整 Windows x64 发布包：
 
 ```bash
-VERSION=2.1.0 ./scripts/build-release.sh
+VERSION=2.1.1 ./scripts/build-release.sh
 ```
 
 运行服务端测试：
