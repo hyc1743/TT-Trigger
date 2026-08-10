@@ -17,6 +17,7 @@ var version = "dev"
 
 func main() {
 	configPath := flag.String("config", "config.json", "path to the JSON configuration file")
+	apiListen := flag.String("api-listen", "", "override the trigger API listen address")
 	initConfig := flag.Bool("init", false, "create a configuration file if it does not exist")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
@@ -43,6 +44,12 @@ func main() {
 	cfg, err := relay.LoadConfig(*configPath)
 	if err != nil {
 		log.Fatalf("load configuration: %v", err)
+	}
+	if *apiListen != "" {
+		cfg.APIListen = *apiListen
+		if err := cfg.Validate(); err != nil {
+			log.Fatalf("validate API listen override: %v", err)
+		}
 	}
 
 	logger := log.New(os.Stdout, "", log.LstdFlags|log.LUTC)

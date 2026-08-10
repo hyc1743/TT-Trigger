@@ -25,6 +25,16 @@ if errorlevel 1 (
   exit /b 1
 )
 
+for %%I in ("%TAILSCALE_EXE%") do set "PATH=%%~dpI;%PATH%"
+set "TAILSCALE_IP="
+for /f "delims=" %%I in ('tailscale.exe ip -4 2^>nul') do if not defined TAILSCALE_IP set "TAILSCALE_IP=%%I"
+if not defined TAILSCALE_IP (
+  echo [ERROR] Could not read the local Tailscale IPv4 address.
+  pause
+  exit /b 1
+)
+set "TT_API_LISTEN=%TAILSCALE_IP%:8788"
+
 set "FIRST_RUN=0"
 if not exist "config.json" (
   set "FIRST_RUN=1"
@@ -51,7 +61,7 @@ if exist "tt-trigger.pid" (
 if not exist "logs" mkdir "logs"
 
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$homeDir=$env:TT_HOME; $exe=Join-Path $homeDir 'tt-trigger-server.exe'; $stdout=Join-Path $homeDir 'logs\server.log'; $stderr=Join-Path $homeDir 'logs\server-error.log'; $pidFile=Join-Path $homeDir 'tt-trigger.pid'; $p=Start-Process -FilePath $exe -WorkingDirectory $homeDir -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru; Set-Content -LiteralPath $pidFile -Value $p.Id -Encoding ascii; Start-Sleep -Milliseconds 700; if ($p.HasExited) { exit 1 }"
+  "$homeDir=$env:TT_HOME; $exe=Join-Path $homeDir 'tt-trigger-server.exe'; $stdout=Join-Path $homeDir 'logs\server.log'; $stderr=Join-Path $homeDir 'logs\server-error.log'; $pidFile=Join-Path $homeDir 'tt-trigger.pid'; $arguments=@('--api-listen',$env:TT_API_LISTEN); $p=Start-Process -FilePath $exe -ArgumentList $arguments -WorkingDirectory $homeDir -WindowStyle Hidden -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru; Set-Content -LiteralPath $pidFile -Value $p.Id -Encoding ascii; Start-Sleep -Milliseconds 700; if ($p.HasExited) { exit 1 }"
 
 if errorlevel 1 (
   echo [ERROR] TT-Trigger failed to start. See logs\server-error.log.
@@ -62,22 +72,11 @@ if errorlevel 1 (
 
 set /p TT_PID=<"tt-trigger.pid"
 
-"%TAILSCALE_EXE%" serve --bg http://127.0.0.1:8788
-if errorlevel 1 (
-  echo [ERROR] Could not configure Tailscale Serve.
-  taskkill /PID %TT_PID% /T /F >nul 2>&1
-  del /Q "tt-trigger.pid" >nul 2>&1
-  pause
-  exit /b 1
-)
-
 echo TT-Trigger started. PID: %TT_PID%
 echo Local extension relay: ws://127.0.0.1:8787/extension
-echo Local Tailscale origin: http://127.0.0.1:8788
+echo Tailscale API: http://%TAILSCALE_IP%:8788
+echo URL example: http://%TAILSCALE_IP%:8788/trigger?token=YOUR_TOKEN^&symbol=BTC
 echo Logs:    %CD%\logs
-echo.
-echo Tailscale URL:
-"%TAILSCALE_EXE%" serve status
 
 if "%FIRST_RUN%"=="1" (
   echo.

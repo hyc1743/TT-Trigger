@@ -44,10 +44,16 @@ func TestConfigValidation(t *testing.T) {
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("valid config rejected: %v", err)
 	}
+	tailscale := valid
+	tailscale.APIListen = "100.86.12.34:8788"
+	if err := tailscale.Validate(); err != nil {
+		t.Fatalf("Tailscale API listen rejected: %v", err)
+	}
 
 	cases := []Config{
 		{ExtensionListen: "0.0.0.0:8787", APIListen: valid.APIListen, Token: valid.Token, TriggerTimeoutMS: 5000},
 		{ExtensionListen: valid.ExtensionListen, APIListen: "0.0.0.0:8788", Token: valid.Token, TriggerTimeoutMS: 5000},
+		{ExtensionListen: valid.ExtensionListen, APIListen: "192.168.1.5:8788", Token: valid.Token, TriggerTimeoutMS: 5000},
 		{ExtensionListen: valid.ExtensionListen, APIListen: valid.APIListen, Token: "short", TriggerTimeoutMS: 5000},
 		{ExtensionListen: valid.ExtensionListen, APIListen: valid.APIListen, Token: valid.Token, TriggerTimeoutMS: 100},
 	}

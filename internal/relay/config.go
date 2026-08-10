@@ -99,7 +99,7 @@ func (c Config) Validate() error {
 	if err := validateLoopbackListen("extension_listen", c.ExtensionListen); err != nil {
 		return err
 	}
-	if err := validateLoopbackListen("api_listen", c.APIListen); err != nil {
+	if err := validateAPIListen(c.APIListen); err != nil {
 		return err
 	}
 	if c.ExtensionListen == c.APIListen {
@@ -110,6 +110,28 @@ func (c Config) Validate() error {
 	}
 	if c.TriggerTimeoutMS < 250 || c.TriggerTimeoutMS > 60000 {
 		return errors.New("trigger_timeout_ms must be between 250 and 60000")
+	}
+	return nil
+}
+
+func validateAPIListen(value string) error {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(value))
+	if err != nil {
+		return fmt.Errorf("api_listen must be a host:port address: %w", err)
+	}
+	if host == "localhost" {
+		return nil
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return errors.New("api_listen must use an IP address")
+	}
+	if ip.IsLoopback() {
+		return nil
+	}
+	_, tailscaleRange, _ := net.ParseCIDR("100.64.0.0/10")
+	if !tailscaleRange.Contains(ip) {
+		return errors.New("api_listen must use a loopback or Tailscale IPv4 address")
 	}
 	return nil
 }
