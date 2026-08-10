@@ -30,6 +30,8 @@ tailscale status
 
 本方案直接监听 Tailscale 的 `100.64.0.0/10` 地址，不使用 Tailscale Serve 或 Funnel。流量仍由 Tailscale WireGuard 网络加密，并且只对 tailnet 中被 ACL 允许的设备开放。
 
+如果这台机器曾运行 TT-Trigger 2.0.0，并且没有用 Tailscale Serve 发布其他服务，可执行一次 `tailscale serve reset` 清理旧版 Serve 配置。
+
 ### 2. 启动服务
 
 解压发布包后，双击 `start.bat`。首次启动会：
