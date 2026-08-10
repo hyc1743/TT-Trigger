@@ -1,4 +1,4 @@
-export function fillAndSubmit(symbol) {
+export async function fillAndSubmit(symbol, addPair = false) {
   const selector = 'input[placeholder="币种或合约地址"], input[placeholder="Symbol or CA"]';
 
   try {
@@ -27,6 +27,25 @@ export function fillAndSubmit(symbol) {
       bubbles: true,
       cancelable: true
     }));
+
+    if (addPair) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      const addPairButton = document.evaluate(
+        '//button[normalize-space(text())="Add Pair" or normalize-space(text())="添加交易对"]',
+        document,
+        null,
+        XPathResult.FIRST_ORDERED_NODE_TYPE,
+        null
+      ).singleNodeValue;
+      if (!addPairButton) {
+        return {
+          ok: false,
+          code: 'ADD_PAIR_BUTTON_NOT_FOUND',
+          message: '未找到 Add Pair 或添加交易对按钮'
+        };
+      }
+      addPairButton.click();
+    }
 
     return { ok: true };
   } catch (error) {

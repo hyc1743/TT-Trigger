@@ -27,13 +27,15 @@ type wireMessage struct {
 	Token   string `json:"token,omitempty"`
 	ID      string `json:"id,omitempty"`
 	Symbol  string `json:"symbol,omitempty"`
+	AddPair bool   `json:"addPair,omitempty"`
 	OK      bool   `json:"ok,omitempty"`
 	Code    string `json:"code,omitempty"`
 	Message string `json:"message,omitempty"`
 }
 
 type triggerRequest struct {
-	Symbol string `json:"symbol"`
+	Symbol  string `json:"symbol"`
+	AddPair bool   `json:"addPair,omitempty"`
 }
 
 type apiResponse struct {
@@ -191,7 +193,7 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "INVALID_SYMBOL", "symbol must contain between 1 and 256 characters", "")
 		return
 	}
-	s.executeTrigger(w, r, symbol)
+	s.executeTrigger(w, r, symbol, body.AddPair)
 }
 
 func (s *Server) handleURLTrigger(w http.ResponseWriter, r *http.Request) {
@@ -210,10 +212,16 @@ func (s *Server) handleURLTrigger(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusBadRequest, "INVALID_SYMBOL", "symbol must contain between 1 and 256 characters", "")
 		return
 	}
-	s.executeTrigger(w, r, symbol)
+	addPairValues, addPairExists := query["addPair"]
+	addPair, ok := parseOptionalBool(addPairValues, addPairExists)
+	if !ok {
+		writeAPIError(w, http.StatusBadRequest, "INVALID_ADD_PAIR", "addPair must be true, false, 1, or 0", "")
+		return
+	}
+	s.executeTrigger(w, r, symbol, addPair)
 }
 
-func (s *Server) executeTrigger(w http.ResponseWriter, r *http.Request, symbol string) {
+func (s *Server) executeTrigger(w http.ResponseWriter, r *http.Request, symbol string, addPair bool) {
 
 	id, err := requestID()
 	if err != nil {
@@ -239,7 +247,7 @@ func (s *Server) executeTrigger(w http.ResponseWriter, r *http.Request, symbol s
 	s.mu.Unlock()
 
 	defer s.clearPending(id)
-	if err := conn.writeJSON(wireMessage{Type: "trigger", ID: id, Symbol: symbol}); err != nil {
+	if err := conn.writeJSON(wireMessage{Type: "trigger", ID: id, Symbol: symbol, AddPair: addPair}); err != nil {
 		conn.close(websocket.CloseInternalServerErr, "write failed")
 		writeAPIError(w, http.StatusServiceUnavailable, "EXTENSION_OFFLINE", "Chrome extension disconnected", id)
 		return
@@ -276,6 +284,23 @@ func validateSymbol(value string) (string, bool) {
 		return "", false
 	}
 	return value, true
+}
+
+func parseOptionalBool(values []string, exists bool) (bool, bool) {
+	if !exists {
+		return false, true
+	}
+	if len(values) != 1 {
+		return false, false
+	}
+	switch strings.ToLower(strings.TrimSpace(values[0])) {
+	case "true", "1":
+		return true, true
+	case "false", "0", "":
+		return false, true
+	default:
+		return false, false
+	}
 }
 
 func (s *Server) handleExtension(w http.ResponseWriter, r *http.Request) {
@@ -400,7 +425,7 @@ func statusForResult(code string) int {
 	switch code {
 	case "NO_TARGET_TAB":
 		return http.StatusConflict
-	case "INPUT_NOT_FOUND", "INPUT_NOT_INTERACTIVE":
+	case "INPUT_NOT_FOUND", "INPUT_NOT_INTERACTIVE", "ADD_PAIR_BUTTON_NOT_FOUND":
 		return http.StatusUnprocessableEntity
 	case "INVALID_MESSAGE":
 		return http.StatusBadGateway

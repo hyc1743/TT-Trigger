@@ -162,7 +162,12 @@ export function isTargetUrl(value) {
 }
 
 async function handleTrigger(message) {
-  if (typeof message.id !== 'string' || typeof message.symbol !== 'string' || message.symbol.length === 0) {
+  if (
+    typeof message.id !== 'string'
+    || typeof message.symbol !== 'string'
+    || message.symbol.length === 0
+    || (message.addPair !== undefined && typeof message.addPair !== 'boolean')
+  ) {
     return { ok: false, code: 'INVALID_MESSAGE', message: '触发消息格式无效' };
   }
 
@@ -177,7 +182,7 @@ async function handleTrigger(message) {
       target: { tabId: tab.id, frameIds: [0] },
       world: 'MAIN',
       func: fillAndSubmit,
-      args: [message.symbol]
+      args: [message.symbol, message.addPair === true]
     });
     const result = injectionResults?.[0]?.result;
     if (!result || typeof result.ok !== 'boolean') {

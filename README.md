@@ -34,7 +34,7 @@ TT-Trigger 由一个 Chrome Manifest V3 插件和一个轻量 Windows Webhook �
 4. 点击插件图标，直接在插件弹窗中粘贴 Token，然后点击“保存并连接”。
 5. 插件弹窗显示“已连接”后即可调用 Webhook。
 
-`TT-Trigger-Chrome-1.1.1.zip` 是插件源码压缩包；Chrome 开发者模式仍需先解压再加载。
+`TT-Trigger-Chrome-1.2.0.zip` 是插件源码压缩包；Chrome 开发者模式仍需先解压再加载。
 
 ### 3. 开放公网端口
 
@@ -58,6 +58,18 @@ http://YOUR_PUBLIC_IP:8787/trigger?token=YOUR_TOKEN&symbol=BTC
 
 Token 参数放在前面，需要填写的币种或合约地址使用 `symbol` 参数。特殊字符需要进行 URL 编码。
 
+如果填写后还需要等待 1000 毫秒并点击“Add Pair”或“添加交易对”按钮，增加可选参数：
+
+```text
+http://YOUR_PUBLIC_IP:8787/trigger?token=YOUR_TOKEN&symbol=BTC&addPair=true
+```
+
+包含特殊字符的 symbol 示例：
+
+```text
+http://YOUR_PUBLIC_IP:8787/trigger?token=YOUR_TOKEN&symbol=BG-P%3ASIREN%2FUSDT%2BOD-S%3ASIREN%2FUSDT&addPair=true
+```
+
 例如调用本机服务：
 
 ```text
@@ -80,6 +92,7 @@ http://127.0.0.1:8787/trigger?token=YOUR_TOKEN&symbol=BTC
 - URL 格式为 `/trigger?token=<token>&symbol=<币种或合约地址>`。
 - 参数顺序示例中固定为 Token 在前、symbol 在后。
 - `symbol` 会去除首尾空格，长度必须为 1–256 个字符。
+- `addPair` 为可选布尔参数；使用 `true` 或 `1` 时，填写后等待 1000 毫秒，再点击文本为“Add Pair”或“添加交易对”的按钮。
 - 同时只处理一个触发请求，不排队。
 
 ### `POST /webhook`
@@ -88,7 +101,7 @@ http://127.0.0.1:8787/trigger?token=YOUR_TOKEN&symbol=BTC
 
 - 请求必须使用 `Content-Type: application/json`。
 - 请求头必须包含 `Authorization: Bearer <token>`。
-- 请求体为 `{"symbol":"币种或合约地址"}`。
+- 请求体为 `{"symbol":"币种或合约地址","addPair":true}`，其中 `addPair` 可省略。
 - `symbol` 会去除首尾空格，长度必须为 1–256 个字符。
 - 同时只处理一个触发请求，不排队。
 
@@ -104,10 +117,12 @@ curl -X POST 'http://YOUR_PUBLIC_IP:8787/webhook' \
 | HTTP | code | 含义 |
 | --- | --- | --- |
 | 400 | `INVALID_SYMBOL` / `INVALID_JSON` | 请求内容无效 |
+| 400 | `INVALID_ADD_PAIR` | addPair 参数不是有效布尔值 |
 | 401 | `UNAUTHORIZED` | Token 缺失或错误 |
 | 409 | `NO_TARGET_TAB` | 当前活动页不是 taoli.tools |
 | 409 | `TRIGGER_BUSY` | 已有触发正在执行 |
 | 422 | `INPUT_NOT_FOUND` | 页面中没有目标输入框 |
+| 422 | `ADD_PAIR_BUTTON_NOT_FOUND` | 未找到 Add Pair 或添加交易对按钮 |
 | 503 | `EXTENSION_OFFLINE` | 插件未连接 |
 | 504 | `EXTENSION_TIMEOUT` | 插件未在超时前响应 |
 
@@ -148,7 +163,7 @@ windows\build-windows.bat
 在 Linux/macOS 上生成完整 Windows x64 发布包：
 
 ```bash
-VERSION=1.1.1 ./scripts/build-release.sh
+VERSION=1.2.0 ./scripts/build-release.sh
 ```
 
 运行服务端测试：

@@ -181,6 +181,29 @@ func TestURLTriggerRoundTrip(t *testing.T) {
 	}
 }
 
+func TestURLTriggerPassesOptionalAddPair(t *testing.T) {
+	_, ts := newTestServer(t, 1000)
+	conn := connectExtension(t, ts.URL)
+
+	seenAddPair := make(chan bool, 1)
+	go func() {
+		var trigger wireMessage
+		if conn.ReadJSON(&trigger) == nil {
+			seenAddPair <- trigger.AddPair
+			_ = conn.WriteJSON(wireMessage{Type: "result", ID: trigger.ID, OK: true})
+		}
+	}()
+
+	url := ts.URL + "/trigger?token=" + testToken + "&symbol=BTC&addPair=true"
+	resp, result := request(t, http.MethodGet, url, "", "")
+	if resp.StatusCode != http.StatusOK || !result.OK {
+		t.Fatalf("unexpected URL trigger response: %d %#v", resp.StatusCode, result)
+	}
+	if addPair := <-seenAddPair; !addPair {
+		t.Fatal("addPair was not passed to the extension")
+	}
+}
+
 func TestURLTriggerRejectsInvalidTokenAndSymbol(t *testing.T) {
 	_, ts := newTestServer(t, 1000)
 	resp, result := request(t, http.MethodGet, ts.URL+"/trigger?token=wrong&symbol=BTC", "", "")
@@ -191,5 +214,10 @@ func TestURLTriggerRejectsInvalidTokenAndSymbol(t *testing.T) {
 	resp, result = request(t, http.MethodGet, ts.URL+"/trigger?token="+testToken, "", "")
 	if resp.StatusCode != http.StatusBadRequest || result.Code != "INVALID_SYMBOL" {
 		t.Fatalf("unexpected symbol response: %d %#v", resp.StatusCode, result)
+	}
+
+	resp, result = request(t, http.MethodGet, ts.URL+"/trigger?token="+testToken+"&symbol=BTC&addPair=maybe", "", "")
+	if resp.StatusCode != http.StatusBadRequest || result.Code != "INVALID_ADD_PAIR" {
+		t.Fatalf("unexpected addPair response: %d %#v", resp.StatusCode, result)
 	}
 }

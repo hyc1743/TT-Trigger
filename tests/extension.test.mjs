@@ -17,11 +17,11 @@ test('relay URL rejects non-loopback and unexpected paths', () => {
   assert.equal(validateRelayUrl('not-a-url').ok, false);
 });
 
-test('page action reports a missing input', () => {
+test('page action reports a missing input', async () => {
   const originalDocument = globalThis.document;
   globalThis.document = { querySelector: () => null };
   try {
-    const result = fillAndSubmit('BTC');
+    const result = await fillAndSubmit('BTC');
     assert.deepEqual(result, {
       ok: false,
       code: 'INPUT_NOT_FOUND',
@@ -32,7 +32,7 @@ test('page action reports a missing input', () => {
   }
 });
 
-test('page action sets symbol before dispatching input and Enter', () => {
+test('page action sets symbol before dispatching input and Enter', async () => {
   const originalDocument = globalThis.document;
   const originalInput = globalThis.HTMLInputElement;
   const originalKeyboardEvent = globalThis.KeyboardEvent;
@@ -65,7 +65,7 @@ test('page action sets symbol before dispatching input and Enter', () => {
   globalThis.document = { querySelector: () => input };
 
   try {
-    assert.deepEqual(fillAndSubmit('BTC'), { ok: true });
+    assert.deepEqual(await fillAndSubmit('BTC'), { ok: true });
     assert.deepEqual(calls, [
       ['value', 'BTC'],
       ['input', undefined],
@@ -76,5 +76,55 @@ test('page action sets symbol before dispatching input and Enter', () => {
     globalThis.HTMLInputElement = originalInput;
     globalThis.KeyboardEvent = originalKeyboardEvent;
     globalThis.Event = originalEvent;
+  }
+});
+
+test('page action waits before clicking Add Pair', async () => {
+  const originalDocument = globalThis.document;
+  const originalInput = globalThis.HTMLInputElement;
+  const originalKeyboardEvent = globalThis.KeyboardEvent;
+  const originalEvent = globalThis.Event;
+  const originalXPathResult = globalThis.XPathResult;
+  const originalSetTimeout = globalThis.setTimeout;
+  const calls = [];
+
+  class FakeInput {
+    set value(value) { calls.push(['value', value]); }
+    dispatchEvent(event) { calls.push([event.type, event.key]); return true; }
+  }
+  class FakeEvent {
+    constructor(type, options) { this.type = type; Object.assign(this, options); }
+  }
+  const button = { click: () => calls.push(['click']) };
+  globalThis.HTMLInputElement = FakeInput;
+  globalThis.Event = FakeEvent;
+  globalThis.KeyboardEvent = FakeEvent;
+  globalThis.XPathResult = { FIRST_ORDERED_NODE_TYPE: 9 };
+  globalThis.setTimeout = (callback, delay) => {
+    calls.push(['delay', delay]);
+    callback();
+    return 1;
+  };
+  globalThis.document = {
+    querySelector: () => new FakeInput(),
+    evaluate: () => ({ singleNodeValue: button })
+  };
+
+  try {
+    assert.deepEqual(await fillAndSubmit('BTC', true), { ok: true });
+    assert.deepEqual(calls, [
+      ['value', 'BTC'],
+      ['input', undefined],
+      ['keydown', 'Enter'],
+      ['delay', 1000],
+      ['click']
+    ]);
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.HTMLInputElement = originalInput;
+    globalThis.KeyboardEvent = originalKeyboardEvent;
+    globalThis.Event = originalEvent;
+    globalThis.XPathResult = originalXPathResult;
+    globalThis.setTimeout = originalSetTimeout;
   }
 });
