@@ -74,10 +74,11 @@ func (c *extensionConn) close(code int, reason string) {
 }
 
 type Server struct {
-	cfg      Config
-	logger   *log.Logger
-	http     *http.Server
-	upgrader websocket.Upgrader
+	cfg           Config
+	logger        *log.Logger
+	extensionHTTP *http.Server
+	apiHTTP       *http.Server
+	upgrader      websocket.Upgrader
 
 	mu        sync.Mutex
 	extension *extensionConn
@@ -101,29 +102,47 @@ func NewServer(cfg Config, logger *log.Logger) *Server {
 			},
 		},
 	}
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", s.handleHealth)
-	mux.HandleFunc("GET /trigger", s.handleURLTrigger)
-	mux.HandleFunc("POST /webhook", s.handleWebhook)
-	mux.HandleFunc("GET /extension", s.handleExtension)
-	mux.HandleFunc("/", s.handleNotFound)
-	s.http = &http.Server{
-		Addr:              cfg.Listen,
-		Handler:           s.securityHeaders(mux),
+	extensionMux := http.NewServeMux()
+	extensionMux.HandleFunc("GET /health", s.handleHealth)
+	extensionMux.HandleFunc("GET /extension", s.handleExtension)
+	extensionMux.HandleFunc("/", s.handleNotFound)
+
+	apiMux := http.NewServeMux()
+	apiMux.HandleFunc("GET /health", s.handleAPIHealth)
+	apiMux.HandleFunc("GET /trigger", s.handleURLTrigger)
+	apiMux.HandleFunc("POST /webhook", s.handleWebhook)
+	apiMux.HandleFunc("/", s.handleNotFound)
+
+	s.extensionHTTP = &http.Server{
+		Addr:              cfg.ExtensionListen,
+		Handler:           s.securityHeaders(extensionMux),
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+	s.apiHTTP = &http.Server{
+		Addr:              cfg.APIListen,
+		Handler:           s.securityHeaders(apiMux),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 	return s
 }
 
-func (s *Server) Handler() http.Handler { return s.http.Handler }
+func (s *Server) ExtensionHandler() http.Handler { return s.extensionHTTP.Handler }
+func (s *Server) APIHandler() http.Handler       { return s.apiHTTP.Handler }
 
 func (s *Server) ListenAndServe() error {
-	s.logger.Printf("TT-Trigger listening on %s", s.cfg.Listen)
-	err := s.http.ListenAndServe()
+	s.logger.Printf("extension relay listening on %s", s.cfg.ExtensionListen)
+	s.logger.Printf("Tailscale API origin listening on %s", s.cfg.APIListen)
+	errCh := make(chan error, 2)
+	go func() { errCh <- s.extensionHTTP.ListenAndServe() }()
+	go func() { errCh <- s.apiHTTP.ListenAndServe() }()
+	err := <-errCh
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
+	_ = s.extensionHTTP.Close()
+	_ = s.apiHTTP.Close()
 	return err
 }
 
@@ -135,7 +154,9 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if conn != nil {
 		conn.close(websocket.CloseGoingAway, "server shutdown")
 	}
-	return s.http.Shutdown(ctx)
+	extensionErr := s.extensionHTTP.Shutdown(ctx)
+	apiErr := s.apiHTTP.Shutdown(ctx)
+	return errors.Join(extensionErr, apiErr)
 }
 
 func (s *Server) securityHeaders(next http.Handler) http.Handler {
@@ -155,6 +176,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	connected := s.extension != nil
 	s.mu.Unlock()
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "extensionConnected": connected})
+}
+
+func (s *Server) handleAPIHealth(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
@@ -445,5 +470,5 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 }
 
 func (s *Server) String() string {
-	return fmt.Sprintf("TT-Trigger(%s)", s.cfg.Listen)
+	return fmt.Sprintf("TT-Trigger(extension=%s, api=%s)", s.cfg.ExtensionListen, s.cfg.APIListen)
 }

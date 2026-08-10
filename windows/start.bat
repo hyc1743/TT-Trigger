@@ -9,6 +9,22 @@ if not exist "tt-trigger-server.exe" (
   exit /b 1
 )
 
+set "TAILSCALE_EXE="
+for /f "delims=" %%I in ('where tailscale.exe 2^>nul') do if not defined TAILSCALE_EXE set "TAILSCALE_EXE=%%I"
+if not defined TAILSCALE_EXE if exist "%ProgramFiles%\Tailscale\tailscale.exe" set "TAILSCALE_EXE=%ProgramFiles%\Tailscale\tailscale.exe"
+if not defined TAILSCALE_EXE (
+  echo [ERROR] Tailscale was not found. Install and sign in to Tailscale first.
+  pause
+  exit /b 1
+)
+
+"%TAILSCALE_EXE%" status >nul 2>&1
+if errorlevel 1 (
+  echo [ERROR] Tailscale is not connected. Open Tailscale and sign in first.
+  pause
+  exit /b 1
+)
+
 set "FIRST_RUN=0"
 if not exist "config.json" (
   set "FIRST_RUN=1"
@@ -45,10 +61,23 @@ if errorlevel 1 (
 )
 
 set /p TT_PID=<"tt-trigger.pid"
+
+"%TAILSCALE_EXE%" serve --bg http://127.0.0.1:8788
+if errorlevel 1 (
+  echo [ERROR] Could not configure Tailscale Serve.
+  taskkill /PID %TT_PID% /T /F >nul 2>&1
+  del /Q "tt-trigger.pid" >nul 2>&1
+  pause
+  exit /b 1
+)
+
 echo TT-Trigger started. PID: %TT_PID%
-echo URL:      http://YOUR_PUBLIC_IP:8787/trigger?token=YOUR_TOKEN^&symbol=BTC
-echo Health:  http://127.0.0.1:8787/health
+echo Local extension relay: ws://127.0.0.1:8787/extension
+echo Local Tailscale origin: http://127.0.0.1:8788
 echo Logs:    %CD%\logs
+echo.
+echo Tailscale URL:
+"%TAILSCALE_EXE%" serve status
 
 if "%FIRST_RUN%"=="1" (
   echo.

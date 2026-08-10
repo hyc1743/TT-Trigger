@@ -6,20 +6,24 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
 )
 
 const (
-	defaultListen           = "0.0.0.0:8787"
+	defaultExtensionListen  = "127.0.0.1:8787"
+	defaultAPIListen        = "127.0.0.1:8788"
 	defaultTriggerTimeoutMS = 5000
 )
 
 type Config struct {
-	Listen           string `json:"listen"`
+	ExtensionListen  string `json:"extension_listen"`
+	APIListen        string `json:"api_listen"`
 	Token            string `json:"token"`
 	TriggerTimeoutMS int    `json:"trigger_timeout_ms"`
+	LegacyListen     string `json:"listen,omitempty"`
 }
 
 func DefaultConfig() (Config, error) {
@@ -28,7 +32,8 @@ func DefaultConfig() (Config, error) {
 		return Config{}, fmt.Errorf("generate token: %w", err)
 	}
 	return Config{
-		Listen:           defaultListen,
+		ExtensionListen:  defaultExtensionListen,
+		APIListen:        defaultAPIListen,
 		Token:            base64.RawURLEncoding.EncodeToString(tokenBytes),
 		TriggerTimeoutMS: defaultTriggerTimeoutMS,
 	}, nil
@@ -83,6 +88,7 @@ func LoadConfig(path string) (Config, error) {
 	if decErr != nil {
 		return Config{}, fmt.Errorf("decode config: %w", decErr)
 	}
+	cfg.normalize()
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -90,14 +96,47 @@ func LoadConfig(path string) (Config, error) {
 }
 
 func (c Config) Validate() error {
-	if strings.TrimSpace(c.Listen) == "" {
-		return errors.New("listen must not be empty")
+	if err := validateLoopbackListen("extension_listen", c.ExtensionListen); err != nil {
+		return err
+	}
+	if err := validateLoopbackListen("api_listen", c.APIListen); err != nil {
+		return err
+	}
+	if c.ExtensionListen == c.APIListen {
+		return errors.New("extension_listen and api_listen must use different addresses")
 	}
 	if len(c.Token) < 32 {
 		return errors.New("token must contain at least 32 characters")
 	}
 	if c.TriggerTimeoutMS < 250 || c.TriggerTimeoutMS > 60000 {
 		return errors.New("trigger_timeout_ms must be between 250 and 60000")
+	}
+	return nil
+}
+
+func (c *Config) normalize() {
+	if strings.TrimSpace(c.ExtensionListen) == "" {
+		c.ExtensionListen = defaultExtensionListen
+	}
+	if strings.TrimSpace(c.APIListen) == "" {
+		c.APIListen = defaultAPIListen
+	}
+	// Legacy versions used a single public listen address. It is intentionally
+	// ignored so upgrading cannot accidentally expose either endpoint publicly.
+	c.LegacyListen = ""
+}
+
+func validateLoopbackListen(name, value string) error {
+	host, _, err := net.SplitHostPort(strings.TrimSpace(value))
+	if err != nil {
+		return fmt.Errorf("%s must be a host:port address: %w", name, err)
+	}
+	if host == "localhost" {
+		return nil
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return fmt.Errorf("%s must use a loopback address", name)
 	}
 	return nil
 }

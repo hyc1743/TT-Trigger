@@ -29,4 +29,5 @@ if errorlevel 1 (
 
 del /Q "tt-trigger.pid" >nul 2>&1
 echo TT-Trigger stopped.
+echo The Tailscale Serve route remains configured and will return an error while the service is stopped.
 endlocal

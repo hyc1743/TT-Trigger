@@ -15,12 +15,24 @@ import (
 
 const testToken = "01234567890123456789012345678901"
 
-func newTestServer(t *testing.T, timeoutMS int) (*Server, *httptest.Server) {
+type testServers struct {
+	URL          string
+	ExtensionURL string
+}
+
+func newTestServer(t *testing.T, timeoutMS int) (*Server, *testServers) {
 	t.Helper()
-	s := NewServer(Config{Listen: "127.0.0.1:0", Token: testToken, TriggerTimeoutMS: timeoutMS}, nil)
-	httpServer := httptest.NewServer(s.Handler())
-	t.Cleanup(httpServer.Close)
-	return s, httpServer
+	s := NewServer(Config{
+		ExtensionListen:  "127.0.0.1:0",
+		APIListen:        "127.0.0.1:0",
+		Token:            testToken,
+		TriggerTimeoutMS: timeoutMS,
+	}, nil)
+	apiServer := httptest.NewServer(s.APIHandler())
+	extensionServer := httptest.NewServer(s.ExtensionHandler())
+	t.Cleanup(apiServer.Close)
+	t.Cleanup(extensionServer.Close)
+	return s, &testServers{URL: apiServer.URL, ExtensionURL: extensionServer.URL}
 }
 
 func request(t *testing.T, method, url, token, body string) (*http.Response, apiResponse) {
@@ -86,6 +98,20 @@ func TestWebhookRejectsUnauthorizedAndInvalidInput(t *testing.T) {
 	}
 }
 
+func TestAPIAndExtensionEndpointsAreIsolated(t *testing.T) {
+	_, ts := newTestServer(t, 1000)
+
+	resp, result := request(t, http.MethodGet, ts.URL+"/extension", "", "")
+	if resp.StatusCode != http.StatusNotFound || result.Code != "NOT_FOUND" {
+		t.Fatalf("extension endpoint leaked through API listener: %d %#v", resp.StatusCode, result)
+	}
+
+	resp, result = request(t, http.MethodGet, ts.ExtensionURL+"/trigger?token="+testToken+"&symbol=BTC", "", "")
+	if resp.StatusCode != http.StatusNotFound || result.Code != "NOT_FOUND" {
+		t.Fatalf("trigger endpoint leaked through extension listener: %d %#v", resp.StatusCode, result)
+	}
+}
+
 func TestWebhookReportsExtensionOffline(t *testing.T) {
 	_, ts := newTestServer(t, 1000)
 	resp, result := request(t, http.MethodPost, ts.URL+"/webhook", testToken, `{"symbol":"BTC"}`)
@@ -96,7 +122,7 @@ func TestWebhookReportsExtensionOffline(t *testing.T) {
 
 func TestWebhookRoundTrip(t *testing.T) {
 	_, ts := newTestServer(t, 1000)
-	conn := connectExtension(t, ts.URL)
+	conn := connectExtension(t, ts.ExtensionURL)
 
 	done := make(chan struct{})
 	go func() {
@@ -117,7 +143,7 @@ func TestWebhookRoundTrip(t *testing.T) {
 
 func TestWebhookMapsPageFailure(t *testing.T) {
 	_, ts := newTestServer(t, 1000)
-	conn := connectExtension(t, ts.URL)
+	conn := connectExtension(t, ts.ExtensionURL)
 
 	go func() {
 		var trigger wireMessage
@@ -134,7 +160,7 @@ func TestWebhookMapsPageFailure(t *testing.T) {
 
 func TestWebhookTimeout(t *testing.T) {
 	_, ts := newTestServer(t, 250)
-	conn := connectExtension(t, ts.URL)
+	conn := connectExtension(t, ts.ExtensionURL)
 	go func() {
 		var ignored wireMessage
 		_ = conn.ReadJSON(&ignored)
@@ -161,7 +187,7 @@ func TestBodyLimit(t *testing.T) {
 
 func TestURLTriggerRoundTrip(t *testing.T) {
 	_, ts := newTestServer(t, 1000)
-	conn := connectExtension(t, ts.URL)
+	conn := connectExtension(t, ts.ExtensionURL)
 
 	seenSymbol := make(chan string, 1)
 	go func() {
@@ -183,7 +209,7 @@ func TestURLTriggerRoundTrip(t *testing.T) {
 
 func TestURLTriggerPassesOptionalAddPair(t *testing.T) {
 	_, ts := newTestServer(t, 1000)
-	conn := connectExtension(t, ts.URL)
+	conn := connectExtension(t, ts.ExtensionURL)
 
 	seenAddPair := make(chan bool, 1)
 	go func() {

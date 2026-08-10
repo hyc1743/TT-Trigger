@@ -1,5 +1,6 @@
 {
-  "listen": "0.0.0.0:8787",
+  "extension_listen": "127.0.0.1:8787",
+  "api_listen": "127.0.0.1:8788",
   "token": "replace-with-at-least-32-characters",
   "trigger_timeout_ms": 5000
 }
