@@ -69,6 +69,46 @@ header p, .status-panel p {
 
 .indicator.connected { border-color: #002fa7; background: #002fa7; }
 
+.token-panel { border-bottom: 1px solid #111111; }
+
+.token-panel > label {
+  display: block;
+  padding: 11px 12px;
+  border-bottom: 1px solid #111111;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.token-row {
+  display: grid;
+  grid-template-columns: 1fr 68px;
+  border-bottom: 1px solid #111111;
+}
+
+.token-row input {
+  width: 100%;
+  min-width: 0;
+  height: 42px;
+  padding: 0 12px;
+  border: 0;
+  border-right: 1px solid #111111;
+  border-radius: 0;
+  background: #ffffff;
+  color: #111111;
+  font: 13px/1 "Helvetica Neue", Helvetica, Arial, sans-serif;
+}
+
+.token-row input:focus { outline: 2px solid #002fa7; outline-offset: -3px; }
+
+.save-row { display: grid; grid-template-columns: 1fr 132px; min-height: 44px; }
+
+#save-status {
+  margin: 0;
+  padding: 13px 12px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 dl { margin: 0; }
 
 dl > div {
@@ -94,8 +134,6 @@ dd {
   white-space: nowrap;
 }
 
-.actions { display: grid; grid-template-columns: 1fr 1fr; }
-
 button {
   min-height: 44px;
   border: 0;
@@ -111,3 +149,5 @@ button:last-child { border-right: 0; }
 button:hover, button:focus-visible { outline: 2px solid #002fa7; outline-offset: -3px; }
 button.primary { color: #ffffff; background: #002fa7; }
 button:disabled { cursor: wait; opacity: 0.55; }
+
+.reconnect { width: 100%; border-right: 0; }

@@ -4,7 +4,7 @@ TT-Trigger 由一个 Chrome Manifest V3 插件和一个轻量 Windows Webhook �
 
 ## 工作方式
 
-1. Windows 服务监听 `0.0.0.0:8787`，接收经过 Bearer Token 鉴权的 Webhook 请求。
+1. Windows 服务监听 `0.0.0.0:8787`，接收 URL 中携带 Token 和 symbol 的触发请求。
 2. Chrome 插件通过本机 `ws://127.0.0.1:8787/extension` 与服务保持连接。
 3. 服务把触发内容发送给插件，并等待页面执行结果后再响应调用方。
 4. 插件只操作最近获得焦点的 Chrome 窗口中的活动标签页，不会操作后台标签页或其他域名。
@@ -31,10 +31,10 @@ TT-Trigger 由一个 Chrome Manifest V3 插件和一个轻量 Windows Webhook �
 1. 打开 `chrome://extensions/`。
 2. 开启右上角的“开发者模式”。
 3. 点击“加载已解压的扩展程序”，选择发布包中的 `extension` 文件夹。
-4. 打开插件的“设置”，保持地址为 `ws://127.0.0.1:8787/extension`，粘贴 Token 并保存。
+4. 点击插件图标，直接在插件弹窗中粘贴 Token，然后点击“保存并连接”。
 5. 插件弹窗显示“已连接”后即可调用 Webhook。
 
-`TT-Trigger-Chrome-1.0.0.zip` 是插件源码压缩包；Chrome 开发者模式仍需先解压再加载。
+`TT-Trigger-Chrome-1.1.0.zip` 是插件源码压缩包；Chrome 开发者模式仍需先解压再加载。
 
 ### 3. 开放公网端口
 
@@ -44,28 +44,24 @@ TT-Trigger 由一个 Chrome Manifest V3 插件和一个轻量 Windows Webhook �
 netsh advfirewall firewall add rule name="TT-Trigger Webhook" dir=in action=allow protocol=TCP localport=8787
 ```
 
-云服务器安全组也需要允许 TCP 8787。若修改了 `config.json` 中的端口，请同时修改防火墙规则和插件的 WebSocket 地址。
+云服务器安全组也需要允许 TCP 8787。插件默认连接本机 8787 端口。
 
-## 调用 Webhook
+## 使用 URL 直接调用
 
 确保当前活动标签页已经打开 `https://taoli.tools/*`，并且页面上已经出现目标输入框。
 
-Windows `curl.exe` 示例：
+在任意浏览器、Webhook 平台或程序中访问以下 URL：
 
-```bat
-curl.exe -X POST "http://YOUR_PUBLIC_IP:8787/webhook" ^
-  -H "Authorization: Bearer YOUR_TOKEN" ^
-  -H "Content-Type: application/json" ^
-  -d "{\"text\":\"BTC\"}"
+```text
+http://YOUR_PUBLIC_IP:8787/trigger?token=YOUR_TOKEN&symbol=BTC
 ```
 
-Linux/macOS 示例：
+Token 参数放在前面，需要填写的币种或合约地址使用 `symbol` 参数。特殊字符需要进行 URL 编码。
 
-```bash
-curl -X POST 'http://YOUR_PUBLIC_IP:8787/webhook' \
-  -H 'Authorization: Bearer YOUR_TOKEN' \
-  -H 'Content-Type: application/json' \
-  -d '{"text":"BTC"}'
+例如调用本机服务：
+
+```text
+http://127.0.0.1:8787/trigger?token=YOUR_TOKEN&symbol=BTC
 ```
 
 成功响应：
@@ -78,19 +74,36 @@ curl -X POST 'http://YOUR_PUBLIC_IP:8787/webhook' \
 
 ## HTTP 接口
 
+### `GET /trigger`
+
+- 可直接在浏览器地址栏中访问。
+- URL 格式为 `/trigger?token=<token>&symbol=<币种或合约地址>`。
+- 参数顺序示例中固定为 Token 在前、symbol 在后。
+- `symbol` 会去除首尾空格，长度必须为 1–256 个字符。
+- 同时只处理一个触发请求，不排队。
+
 ### `POST /webhook`
+
+原有 POST 调用方式继续保留：
 
 - 请求必须使用 `Content-Type: application/json`。
 - 请求头必须包含 `Authorization: Bearer <token>`。
-- 请求体为 `{"text":"币种或合约地址"}`。
-- `text` 会去除首尾空格，长度必须为 1–256 个字符。
+- 请求体为 `{"symbol":"币种或合约地址"}`。
+- `symbol` 会去除首尾空格，长度必须为 1–256 个字符。
 - 同时只处理一个触发请求，不排队。
+
+```bash
+curl -X POST 'http://YOUR_PUBLIC_IP:8787/webhook' \
+  -H 'Authorization: Bearer YOUR_TOKEN' \
+  -H 'Content-Type: application/json' \
+  -d '{"symbol":"BTC"}'
+```
 
 常见错误：
 
 | HTTP | code | 含义 |
 | --- | --- | --- |
-| 400 | `INVALID_TEXT` / `INVALID_JSON` | 请求内容无效 |
+| 400 | `INVALID_SYMBOL` / `INVALID_JSON` | 请求内容无效 |
 | 401 | `UNAUTHORIZED` | Token 缺失或错误 |
 | 409 | `NO_TARGET_TAB` | 当前活动页不是 taoli.tools |
 | 409 | `TRIGGER_BUSY` | 已有触发正在执行 |
@@ -135,7 +148,7 @@ windows\build-windows.bat
 在 Linux/macOS 上生成完整 Windows x64 发布包：
 
 ```bash
-VERSION=1.0.0 ./scripts/build-release.sh
+VERSION=1.1.0 ./scripts/build-release.sh
 ```
 
 运行服务端测试：

@@ -24,6 +24,18 @@
       <p id="status-message">请稍候</p>
     </section>
 
+    <form id="token-form" class="token-panel" novalidate>
+      <label for="token">Token</label>
+      <div class="token-row">
+        <input id="token" type="password" autocomplete="off" spellcheck="false" minlength="32" required>
+        <button id="toggle-token" type="button">显示</button>
+      </div>
+      <div class="save-row">
+        <p id="save-status" role="status"></p>
+        <button type="submit" class="primary">保存并连接</button>
+      </div>
+    </form>
+
     <dl>
       <div>
         <dt>本机服务</dt>
@@ -35,10 +47,7 @@
       </div>
     </dl>
 
-    <div class="actions">
-      <button id="reconnect" type="button">重新连接</button>
-      <button id="open-options" type="button" class="primary">设置</button>
-    </div>
+    <button id="reconnect" class="reconnect" type="button">重新连接</button>
   </main>
   <script type="module" src="popup.js"></script>
 </body>

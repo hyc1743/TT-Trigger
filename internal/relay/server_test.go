@@ -75,20 +75,20 @@ func connectExtension(t *testing.T, baseURL string) *websocket.Conn {
 func TestWebhookRejectsUnauthorizedAndInvalidInput(t *testing.T) {
 	_, ts := newTestServer(t, 1000)
 
-	resp, result := request(t, http.MethodPost, ts.URL+"/webhook", "", `{"text":"BTC"}`)
+	resp, result := request(t, http.MethodPost, ts.URL+"/webhook", "", `{"symbol":"BTC"}`)
 	if resp.StatusCode != http.StatusUnauthorized || result.Code != "UNAUTHORIZED" {
 		t.Fatalf("unexpected auth response: %d %#v", resp.StatusCode, result)
 	}
 
-	resp, result = request(t, http.MethodPost, ts.URL+"/webhook", testToken, `{"text":"  "}`)
-	if resp.StatusCode != http.StatusBadRequest || result.Code != "INVALID_TEXT" {
+	resp, result = request(t, http.MethodPost, ts.URL+"/webhook", testToken, `{"symbol":"  "}`)
+	if resp.StatusCode != http.StatusBadRequest || result.Code != "INVALID_SYMBOL" {
 		t.Fatalf("unexpected validation response: %d %#v", resp.StatusCode, result)
 	}
 }
 
 func TestWebhookReportsExtensionOffline(t *testing.T) {
 	_, ts := newTestServer(t, 1000)
-	resp, result := request(t, http.MethodPost, ts.URL+"/webhook", testToken, `{"text":"BTC"}`)
+	resp, result := request(t, http.MethodPost, ts.URL+"/webhook", testToken, `{"symbol":"BTC"}`)
 	if resp.StatusCode != http.StatusServiceUnavailable || result.Code != "EXTENSION_OFFLINE" {
 		t.Fatalf("unexpected response: %d %#v", resp.StatusCode, result)
 	}
@@ -108,7 +108,7 @@ func TestWebhookRoundTrip(t *testing.T) {
 		_ = conn.WriteJSON(wireMessage{Type: "result", ID: trigger.ID, OK: true})
 	}()
 
-	resp, result := request(t, http.MethodPost, ts.URL+"/webhook", testToken, `{"text":"BTC"}`)
+	resp, result := request(t, http.MethodPost, ts.URL+"/webhook", testToken, `{"symbol":"BTC"}`)
 	if resp.StatusCode != http.StatusOK || !result.OK || result.RequestID == "" {
 		t.Fatalf("unexpected response: %d %#v", resp.StatusCode, result)
 	}
@@ -126,7 +126,7 @@ func TestWebhookMapsPageFailure(t *testing.T) {
 		}
 	}()
 
-	resp, result := request(t, http.MethodPost, ts.URL+"/webhook", testToken, `{"text":"BTC"}`)
+	resp, result := request(t, http.MethodPost, ts.URL+"/webhook", testToken, `{"symbol":"BTC"}`)
 	if resp.StatusCode != http.StatusUnprocessableEntity || result.Code != "INPUT_NOT_FOUND" {
 		t.Fatalf("unexpected response: %d %#v", resp.StatusCode, result)
 	}
@@ -141,7 +141,7 @@ func TestWebhookTimeout(t *testing.T) {
 	}()
 
 	start := time.Now()
-	resp, result := request(t, http.MethodPost, ts.URL+"/webhook", testToken, `{"text":"BTC"}`)
+	resp, result := request(t, http.MethodPost, ts.URL+"/webhook", testToken, `{"symbol":"BTC"}`)
 	if resp.StatusCode != http.StatusGatewayTimeout || result.Code != "EXTENSION_TIMEOUT" {
 		t.Fatalf("unexpected response: %d %#v", resp.StatusCode, result)
 	}
@@ -152,9 +152,44 @@ func TestWebhookTimeout(t *testing.T) {
 
 func TestBodyLimit(t *testing.T) {
 	_, ts := newTestServer(t, 1000)
-	body, _ := json.Marshal(triggerRequest{Text: string(bytes.Repeat([]byte("x"), maxBodyBytes+1))})
+	body, _ := json.Marshal(triggerRequest{Symbol: string(bytes.Repeat([]byte("x"), maxBodyBytes+1))})
 	resp, result := request(t, http.MethodPost, ts.URL+"/webhook", testToken, string(body))
 	if resp.StatusCode != http.StatusRequestEntityTooLarge || result.Code != "BODY_TOO_LARGE" {
 		t.Fatalf("unexpected response: %d %#v", resp.StatusCode, result)
+	}
+}
+
+func TestURLTriggerRoundTrip(t *testing.T) {
+	_, ts := newTestServer(t, 1000)
+	conn := connectExtension(t, ts.URL)
+
+	seenSymbol := make(chan string, 1)
+	go func() {
+		var trigger wireMessage
+		if conn.ReadJSON(&trigger) == nil {
+			seenSymbol <- trigger.Symbol
+			_ = conn.WriteJSON(wireMessage{Type: "result", ID: trigger.ID, OK: true})
+		}
+	}()
+
+	resp, result := request(t, http.MethodGet, ts.URL+"/trigger?token="+testToken+"&symbol=BTC", "", "")
+	if resp.StatusCode != http.StatusOK || !result.OK {
+		t.Fatalf("unexpected URL trigger response: %d %#v", resp.StatusCode, result)
+	}
+	if symbol := <-seenSymbol; symbol != "BTC" {
+		t.Fatalf("unexpected symbol: %q", symbol)
+	}
+}
+
+func TestURLTriggerRejectsInvalidTokenAndSymbol(t *testing.T) {
+	_, ts := newTestServer(t, 1000)
+	resp, result := request(t, http.MethodGet, ts.URL+"/trigger?token=wrong&symbol=BTC", "", "")
+	if resp.StatusCode != http.StatusUnauthorized || result.Code != "UNAUTHORIZED" {
+		t.Fatalf("unexpected token response: %d %#v", resp.StatusCode, result)
+	}
+
+	resp, result = request(t, http.MethodGet, ts.URL+"/trigger?token="+testToken, "", "")
+	if resp.StatusCode != http.StatusBadRequest || result.Code != "INVALID_SYMBOL" {
+		t.Fatalf("unexpected symbol response: %d %#v", resp.StatusCode, result)
 	}
 }

@@ -1,4 +1,4 @@
-export function fillAndSubmit(text) {
+export function fillAndSubmit(symbol) {
   const selector = 'input[placeholder="币种或合约地址"], input[placeholder="Symbol or CA"]';
 
   try {
@@ -13,9 +13,9 @@ export function fillAndSubmit(text) {
 
     const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
     if (valueSetter) {
-      valueSetter.call(input, text);
+      valueSetter.call(input, symbol);
     } else {
-      input.value = text;
+      input.value = symbol;
     }
 
     input.dispatchEvent(new Event('input', { bubbles: true }));

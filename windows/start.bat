@@ -46,7 +46,7 @@ if errorlevel 1 (
 
 set /p TT_PID=<"tt-trigger.pid"
 echo TT-Trigger started. PID: %TT_PID%
-echo Webhook: http://YOUR_PUBLIC_IP:8787/webhook
+echo URL:      http://YOUR_PUBLIC_IP:8787/trigger?token=YOUR_TOKEN^&symbol=BTC
 echo Health:  http://127.0.0.1:8787/health
 echo Logs:    %CD%\logs
 

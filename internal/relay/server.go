@@ -26,14 +26,14 @@ type wireMessage struct {
 	Type    string `json:"type"`
 	Token   string `json:"token,omitempty"`
 	ID      string `json:"id,omitempty"`
-	Text    string `json:"text,omitempty"`
+	Symbol  string `json:"symbol,omitempty"`
 	OK      bool   `json:"ok,omitempty"`
 	Code    string `json:"code,omitempty"`
 	Message string `json:"message,omitempty"`
 }
 
 type triggerRequest struct {
-	Text string `json:"text"`
+	Symbol string `json:"symbol"`
 }
 
 type apiResponse struct {
@@ -101,6 +101,7 @@ func NewServer(cfg Config, logger *log.Logger) *Server {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.handleHealth)
+	mux.HandleFunc("GET /trigger", s.handleURLTrigger)
 	mux.HandleFunc("POST /webhook", s.handleWebhook)
 	mux.HandleFunc("GET /extension", s.handleExtension)
 	mux.HandleFunc("/", s.handleNotFound)
@@ -178,18 +179,41 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 			status = http.StatusRequestEntityTooLarge
 			code = "BODY_TOO_LARGE"
 		}
-		writeAPIError(w, status, code, "request body must be a JSON object containing text", "")
+		writeAPIError(w, status, code, "request body must be a JSON object containing symbol", "")
 		return
 	}
 	if err := ensureJSONEOF(decoder); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "INVALID_JSON", "request body must contain one JSON object", "")
 		return
 	}
-	body.Text = strings.TrimSpace(body.Text)
-	if body.Text == "" || !utf8.ValidString(body.Text) || utf8.RuneCountInString(body.Text) > 256 {
-		writeAPIError(w, http.StatusBadRequest, "INVALID_TEXT", "text must contain between 1 and 256 characters", "")
+	symbol, ok := validateSymbol(body.Symbol)
+	if !ok {
+		writeAPIError(w, http.StatusBadRequest, "INVALID_SYMBOL", "symbol must contain between 1 and 256 characters", "")
 		return
 	}
+	s.executeTrigger(w, r, symbol)
+}
+
+func (s *Server) handleURLTrigger(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	if !s.tokenEqual(strings.TrimSpace(query.Get("token"))) {
+		writeAPIError(w, http.StatusUnauthorized, "UNAUTHORIZED", "invalid or missing token", "")
+		return
+	}
+	symbolValues, exists := query["symbol"]
+	if !exists || len(symbolValues) != 1 {
+		writeAPIError(w, http.StatusBadRequest, "INVALID_SYMBOL", "URL must contain one symbol parameter", "")
+		return
+	}
+	symbol, ok := validateSymbol(symbolValues[0])
+	if !ok {
+		writeAPIError(w, http.StatusBadRequest, "INVALID_SYMBOL", "symbol must contain between 1 and 256 characters", "")
+		return
+	}
+	s.executeTrigger(w, r, symbol)
+}
+
+func (s *Server) executeTrigger(w http.ResponseWriter, r *http.Request, symbol string) {
 
 	id, err := requestID()
 	if err != nil {
@@ -215,7 +239,7 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	defer s.clearPending(id)
-	if err := conn.writeJSON(wireMessage{Type: "trigger", ID: id, Text: body.Text}); err != nil {
+	if err := conn.writeJSON(wireMessage{Type: "trigger", ID: id, Symbol: symbol}); err != nil {
 		conn.close(websocket.CloseInternalServerErr, "write failed")
 		writeAPIError(w, http.StatusServiceUnavailable, "EXTENSION_OFFLINE", "Chrome extension disconnected", id)
 		return
@@ -244,6 +268,14 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	case <-r.Context().Done():
 		return
 	}
+}
+
+func validateSymbol(value string) (string, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" || !utf8.ValidString(value) || utf8.RuneCountInString(value) > 256 {
+		return "", false
+	}
+	return value, true
 }
 
 func (s *Server) handleExtension(w http.ResponseWriter, r *http.Request) {

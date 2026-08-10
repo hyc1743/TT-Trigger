@@ -32,7 +32,7 @@ test('page action reports a missing input', () => {
   }
 });
 
-test('page action sets the value before dispatching input and Enter', () => {
+test('page action sets symbol before dispatching input and Enter', () => {
   const originalDocument = globalThis.document;
   const originalInput = globalThis.HTMLInputElement;
   const originalKeyboardEvent = globalThis.KeyboardEvent;

@@ -11,7 +11,7 @@ if (manifest.background?.type !== 'module') throw new Error('background service 
 const paths = [
   manifest.background.service_worker,
   manifest.action.default_popup,
-  manifest.options_page,
+  ...(manifest.options_page ? [manifest.options_page] : []),
   ...Object.values(manifest.icons),
   ...Object.values(manifest.action.default_icon)
 ];
