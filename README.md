@@ -34,7 +34,7 @@ TT-Trigger 由一个 Chrome Manifest V3 插件和一个轻量 Windows Webhook �
 4. 点击插件图标，直接在插件弹窗中粘贴 Token，然后点击“保存并连接”。
 5. 插件弹窗显示“已连接”后即可调用 Webhook。
 
-`TT-Trigger-Chrome-1.1.0.zip` 是插件源码压缩包；Chrome 开发者模式仍需先解压再加载。
+`TT-Trigger-Chrome-1.1.1.zip` 是插件源码压缩包；Chrome 开发者模式仍需先解压再加载。
 
 ### 3. 开放公网端口
 
@@ -148,7 +148,7 @@ windows\build-windows.bat
 在 Linux/macOS 上生成完整 Windows x64 发布包：
 
 ```bash
-VERSION=1.1.0 ./scripts/build-release.sh
+VERSION=1.1.1 ./scripts/build-release.sh
 ```
 
 运行服务端测试：

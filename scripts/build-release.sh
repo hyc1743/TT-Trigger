@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="${VERSION:-1.1.0}"
+VERSION="${VERSION:-1.1.1}"
 STAGE="$ROOT/dist/TT-Trigger-${VERSION}-windows-x64"
 ARCHIVE="$ROOT/dist/TT-Trigger-${VERSION}-windows-x64.zip"
 

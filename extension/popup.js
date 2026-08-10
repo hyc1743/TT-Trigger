@@ -19,11 +19,18 @@ const toggleToken = document.querySelector('#toggle-token');
 const saveStatus = document.querySelector('#save-status');
 
 function render(status) {
-  statusLabel.textContent = labels[status.state] ?? '状态未知';
-  statusMessage.textContent = status.message ?? '';
+  const label = labels[status.state] ?? '状态未知';
+  const detail = status.message ?? '';
+  const hideDetail = !detail || detail === label || status.state === 'connected';
+  statusLabel.textContent = label;
+  statusMessage.textContent = hideDetail ? '' : detail;
+  statusMessage.hidden = hideDetail;
   relayUrl.textContent = status.relayUrl || '未设置';
   relayUrl.title = status.relayUrl || '';
   indicator.classList.toggle('connected', status.state === 'connected');
+  if (status.state === 'connected' || status.state === 'auth_error' || status.state === 'disconnected') {
+    saveStatus.textContent = '';
+  }
 }
 
 chrome.runtime.onMessage.addListener((message) => {
@@ -46,6 +53,7 @@ tokenForm.addEventListener('submit', async (event) => {
   }
   await chrome.storage.local.set({ token });
   saveStatus.textContent = '已保存，正在连接';
+  await chrome.runtime.sendMessage({ type: 'reconnect' }).catch(() => {});
 });
 
 reconnectButton.addEventListener('click', async () => {

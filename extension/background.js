@@ -205,12 +205,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return false;
 });
 
-chrome.storage.onChanged.addListener((changes, areaName) => {
-  if (areaName === 'local' && (changes.relayUrl || changes.token)) {
-    void restartConnection();
-  }
-});
-
 chrome.runtime.onStartup.addListener(() => void restartConnection());
 chrome.runtime.onInstalled.addListener(() => void restartConnection());
 
