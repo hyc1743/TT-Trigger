@@ -13,11 +13,33 @@ TT-Trigger 可以从外部程序触发 Chrome，在当前 `https://taoli.tools/*
 BG-P:SIREN/USDT+OD-S:SIREN/USDT
 ```
 
+## 发布文件与下载选择
+
+每次发布只提供以下4个主要文件，互相独立：
+
+| 文件 | 内容 |
+|---|---|
+| `invoke-trigger.py` | 本地和云端共用的Python调用示例 |
+| `TT-Trigger-Chrome-4.0.0.zip` | Chrome Manifest V3插件 |
+| `TT-Trigger-Windows-Local-4.0.0.zip` | localhost/Tailscale Windows本地服务 |
+| `TT-Trigger-Cloudflare-4.0.0.zip` | Cloudflare Worker与Durable Objects自部署源码 |
+
+按使用方案下载：
+
+| 使用方案 | 必须下载 | 可选下载 |
+|---|---|---|
+| 使用开发者提供的Cloudflare中继 | Chrome插件包 | `invoke-trigger.py`，用于Python调用 |
+| 自己部署Cloudflare中继 | Chrome插件包 + Cloudflare部署包 | `invoke-trigger.py`，用于Python调用 |
+| Windows localhost/Tailscale本地模式 | Chrome插件包 + Windows本地部署包 | `invoke-trigger.py`；本地包已自带PowerShell调用示例 |
+| 仅更新Chrome插件 | Chrome插件包 | 无 |
+
+每个主要文件旁边都有同名 `.sha256` 校验文件。不再发布历史版本目录、解压后的构建目录或包含重复组件的整合包。
+
 ## 安装 Chrome 插件
 
-1. 下载并解压 `dist/TT-Trigger-4.0.0-windows-x64.zip`。
+1. 下载并解压 `TT-Trigger-Chrome-4.0.0.zip`。
 2. 打开 `chrome://extensions`，启用“开发者模式”。
-3. 点击“加载已解压的扩展程序”，选择压缩包内的 `extension` 目录。
+3. 点击“加载已解压的扩展程序”，选择包含 `manifest.json` 的解压目录。
 4. 点击 TT Trigger 图标，在弹窗选择本地或云端模式。
 
 最低支持 Chrome 116。插件配置和E2EE密钥只存放在 `chrome.storage.local`，不会使用Chrome同步。
@@ -26,10 +48,11 @@ BG-P:SIREN/USDT+OD-S:SIREN/USDT
 
 ### 启动
 
-1. 运行 `start.bat`。首次运行会生成唯一的 `config.json`。
-2. 打开插件，选择“本地 / Tailscale”。
-3. 将 `config.json` 中的 `extension_token` 填入插件，点击“保存并连接”。
-4. 插件显示“已连接”后即可调用。
+1. 下载并完整解压 `TT-Trigger-Windows-Local-4.0.0.zip`。
+2. 进入解压后的目录，运行 `start.bat`。首次运行会生成唯一的 `config.json`。
+3. 另行安装Chrome插件，选择“本地 / Tailscale”。
+4. 将 `config.json` 中的 `extension_token` 填入插件，点击“保存并连接”。
+5. 插件显示“已连接”后即可调用。
 
 服务始终监听：
 
@@ -129,13 +152,13 @@ POST
 
 ### Python调用云端
 
-先安装AES-GCM依赖：
+另行下载 `invoke-trigger.py`，把它和插件导出的JSON放在同一目录。先安装AES-GCM依赖：
 
 ```powershell
-install-cloud-client.bat
+python3 -m pip install "cryptography>=43,<47"
 ```
 
-把插件导出的JSON和 `invoke-trigger.py` 放在同一目录。脚本会自动读取目录中唯一的TT-Trigger JSON文件，无需传入 `--config`：
+脚本会自动读取目录中唯一的TT-Trigger JSON文件，无需传入 `--config`：
 
 ```powershell
 python3 invoke-trigger.py --symbol BTC
@@ -148,7 +171,7 @@ python3 invoke-trigger.py --symbol "BG-P:SIREN/USDT+OD-S:SIREN/USDT" --add-pair
 
 ### 自部署Cloudflare Worker
 
-源码位于 [`cloudflare/`](cloudflare/README.md)，使用Workers Free和Durable Objects。完整的截图无关、可逐条复制执行的部署说明请阅读 **[Cloudflare Relay部署指南](cloudflare/README.md)**；Windows发布包中也已包含整个 `cloudflare` 目录。
+下载 `TT-Trigger-Cloudflare-4.0.0.zip` 并解压，或者直接使用仓库中的 [`cloudflare/`](cloudflare/README.md)。完整步骤见 **[Cloudflare Relay部署指南](cloudflare/README.md)**。
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/hyc1743/TT-Trigger/tree/main/cloudflare)
 
@@ -227,10 +250,12 @@ VERSION=4.0.0 ./scripts/build-release.sh
 发布产物：
 
 ```text
-dist/TT-Trigger-4.0.0-windows-x64.zip
-dist/TT-Trigger-4.0.0-windows-x64.zip.sha256
-dist/TT-Trigger-4.0.0-cloudflare.zip
-dist/TT-Trigger-4.0.0-cloudflare.zip.sha256
+dist/invoke-trigger.py
+dist/invoke-trigger.py.sha256
 dist/TT-Trigger-Chrome-4.0.0.zip
 dist/TT-Trigger-Chrome-4.0.0.zip.sha256
+dist/TT-Trigger-Windows-Local-4.0.0.zip
+dist/TT-Trigger-Windows-Local-4.0.0.zip.sha256
+dist/TT-Trigger-Cloudflare-4.0.0.zip
+dist/TT-Trigger-Cloudflare-4.0.0.zip.sha256
 ```
