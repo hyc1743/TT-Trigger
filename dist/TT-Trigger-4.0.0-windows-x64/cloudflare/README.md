@@ -204,10 +204,12 @@ True tt-trigger-relay       1
 1. 在“新增调用方”输入名称，例如“交易机器人”。
 2. 点击 **新增并导出**。
 3. 妥善保存下载的JSON文件。
-4. 使用该文件调用：
+4. 把导出的JSON与 `invoke-trigger.py` 放在同一目录，直接调用：
    ```powershell
-   python invoke-trigger.py --config C:\path\client.json --symbol BTC
+   python3 invoke-trigger.py --symbol BTC
    ```
+
+脚本会自动识别同目录唯一的TT-Trigger JSON文件；只有存在多个有效配置时才需要添加 `--config 文件名`。
 
 ## 五、以后增加其他设备：激活码模式
 

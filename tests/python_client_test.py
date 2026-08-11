@@ -88,6 +88,31 @@ class PythonClientTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             CLIENT.resolve_credentials(loaded, "missing", None)
 
+    def test_discovers_the_only_supported_json_next_to_the_script(self):
+        secret = base64.urlsafe_b64encode(b"x" * 32).rstrip(b"=").decode()
+        cloud = {
+            "version": 1,
+            "mode": "cloud_e2ee",
+            "relay_url": "https://relay.example.workers.dev",
+            "device_id": "device",
+            "key_id": "caller",
+            "relay_token": "token",
+            "relay_grant": "grant",
+            "secret": secret,
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / "config.example.json").write_text(json.dumps({"deployment": {"mode": "local_tailscale"}, "hmac_keys": []}), encoding="utf-8")
+            expected = root / "tt-trigger-bot.json"
+            expected.write_text(json.dumps(cloud), encoding="utf-8")
+            (root / "unrelated.json").write_text('{"hello":"world"}', encoding="utf-8")
+            self.assertEqual(CLIENT.discover_config_path(root), expected)
+
+            duplicate = root / "second-client.json"
+            duplicate.write_text(json.dumps(cloud), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "多个配置文件"):
+                CLIENT.discover_config_path(root)
+
     def test_cloud_request_and_encrypted_response(self):
         try:
             from cryptography.hazmat.primitives.ciphers.aead import AESGCM

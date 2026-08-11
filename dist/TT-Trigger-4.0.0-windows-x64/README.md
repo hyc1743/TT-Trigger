@@ -50,14 +50,14 @@ http://TAILSCALE_IP:8788/webhook
 `invoke-trigger.py` 默认复用同目录的 `config.json`：
 
 ```powershell
-python invoke-trigger.py --symbol BTC
-python invoke-trigger.py --symbol "BG-P:SIREN/USDT+OD-S:SIREN/USDT" --add-pair
+python3 invoke-trigger.py --symbol BTC
+python3 invoke-trigger.py --symbol "BG-P:SIREN/USDT+OD-S:SIREN/USDT" --add-pair
 ```
 
 调用Tailscale地址时覆盖Base URL：
 
 ```powershell
-python invoke-trigger.py --base-url http://100.100.20.30:8788 --symbol BTC
+python3 invoke-trigger.py --base-url http://100.100.20.30:8788 --symbol BTC
 ```
 
 本地请求格式：
@@ -135,12 +135,14 @@ POST
 install-cloud-client.bat
 ```
 
-然后直接使用插件导出的文件：
+把插件导出的JSON和 `invoke-trigger.py` 放在同一目录。脚本会自动读取目录中唯一的TT-Trigger JSON文件，无需传入 `--config`：
 
 ```powershell
-python invoke-trigger.py --config C:\path\client.json --symbol BTC
-python invoke-trigger.py --config C:\path\client.json --symbol "BG-P:SIREN/USDT+OD-S:SIREN/USDT" --add-pair
+python3 invoke-trigger.py --symbol BTC
+python3 invoke-trigger.py --symbol "BG-P:SIREN/USDT+OD-S:SIREN/USDT" --add-pair
 ```
+
+`config.example.json`和无关JSON会被忽略。如果同目录存在多个有效的TT-Trigger配置，脚本会要求使用 `--config 文件名` 明确选择。
 
 只有云端模式依赖 `cryptography`；本地模式仍只使用Python标准库。
 
@@ -229,4 +231,6 @@ dist/TT-Trigger-4.0.0-windows-x64.zip
 dist/TT-Trigger-4.0.0-windows-x64.zip.sha256
 dist/TT-Trigger-4.0.0-cloudflare.zip
 dist/TT-Trigger-4.0.0-cloudflare.zip.sha256
+dist/TT-Trigger-Chrome-4.0.0.zip
+dist/TT-Trigger-Chrome-4.0.0.zip.sha256
 ```

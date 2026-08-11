@@ -81,6 +81,40 @@ def load_config(path: str) -> dict:
     return value
 
 
+def is_supported_config(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    if value.get("mode") == "cloud_e2ee" and value.get("version") == 1:
+        return True
+    deployment = value.get("deployment")
+    return (
+        isinstance(deployment, dict)
+        and deployment.get("mode") == "local_tailscale"
+        and isinstance(value.get("hmac_keys"), list)
+    )
+
+
+def discover_config_path(directory: Optional[pathlib.Path] = None) -> pathlib.Path:
+    directory = directory or pathlib.Path(__file__).resolve().parent
+    candidates = []
+    for path in sorted(directory.glob("*.json"), key=lambda item: item.name.lower()):
+        if path.name.lower() == "config.example.json":
+            continue
+        try:
+            with path.open("r", encoding="utf-8-sig") as stream:
+                value = json.load(stream)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if is_supported_config(value):
+            candidates.append(path)
+    if len(candidates) == 1:
+        return candidates[0]
+    if not candidates:
+        raise ValueError(f"脚本目录 {directory} 中没有可用的TT-Trigger JSON配置文件")
+    names = "、".join(path.name for path in candidates)
+    raise ValueError(f"脚本目录中发现多个配置文件：{names}；请使用--config明确指定")
+
+
 def infer_base_url(config: dict) -> str:
     deployment = config.get("deployment")
     if not isinstance(deployment, dict):
@@ -298,7 +332,7 @@ def build_signed_request(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="调用 TT-Trigger HMAC webhook")
-    parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="默认读取脚本同目录的config.json")
+    parser.add_argument("--config", help="可选；省略时自动查找脚本同目录唯一的TT-Trigger JSON文件")
     parser.add_argument("--base-url", help="覆盖config.json推断的地址，例如Tailscale地址")
     parser.add_argument("--symbol", required=True, help="要填写的 symbol")
     parser.add_argument("--add-pair", action="store_true", help="填写后等待并点击添加交易对")
@@ -312,7 +346,10 @@ def main() -> int:
     args = parse_args()
     try:
         needs_config = not (args.base_url and args.key_id and args.secret)
-        config = load_config(args.config) if needs_config else {}
+        config = {}
+        if needs_config:
+            config_path = pathlib.Path(args.config) if args.config else discover_config_path()
+            config = load_config(str(config_path))
         if config.get("mode") == "cloud_e2ee":
             request, request_id = build_cloud_request(config, args.symbol, args.add_pair)
             try:
