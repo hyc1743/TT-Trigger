@@ -229,4 +229,6 @@ dist/TT-Trigger-4.0.0-windows-x64.zip
 dist/TT-Trigger-4.0.0-windows-x64.zip.sha256
 dist/TT-Trigger-4.0.0-cloudflare.zip
 dist/TT-Trigger-4.0.0-cloudflare.zip.sha256
+dist/TT-Trigger-Chrome-4.0.0.zip
+dist/TT-Trigger-Chrome-4.0.0.zip.sha256
 ```

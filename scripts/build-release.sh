@@ -6,12 +6,13 @@ VERSION="${VERSION:-4.0.0}"
 STAGE="$ROOT/dist/TT-Trigger-${VERSION}-windows-x64"
 ARCHIVE="$ROOT/dist/TT-Trigger-${VERSION}-windows-x64.zip"
 CLOUD_ARCHIVE="$ROOT/dist/TT-Trigger-${VERSION}-cloudflare.zip"
+CHROME_ARCHIVE="$ROOT/dist/TT-Trigger-Chrome-${VERSION}.zip"
 
 command -v go >/dev/null 2>&1 || { echo "Go 1.22+ is required to build the release." >&2; exit 1; }
 command -v python3 >/dev/null 2>&1 || { echo "Python 3 is required to package the release." >&2; exit 1; }
 command -v npm >/dev/null 2>&1 || { echo "npm is required to validate the release." >&2; exit 1; }
 
-python3 - "$STAGE" "$ARCHIVE" "$ARCHIVE.sha256" "$CLOUD_ARCHIVE" "$CLOUD_ARCHIVE.sha256" <<'PY'
+python3 - "$STAGE" "$ARCHIVE" "$ARCHIVE.sha256" "$CLOUD_ARCHIVE" "$CLOUD_ARCHIVE.sha256" "$CHROME_ARCHIVE" "$CHROME_ARCHIVE.sha256" <<'PY'
 import pathlib
 import shutil
 import sys
@@ -68,6 +69,8 @@ write_tree(stage / f"TT-Trigger-Chrome-{version}.zip", stage / "extension", stag
 write_tree(archive, stage, stage.parent)
 PY
 
+cp "$STAGE/TT-Trigger-Chrome-${VERSION}.zip" "$CHROME_ARCHIVE"
+
 python3 - "$ROOT/cloudflare" "$CLOUD_ARCHIVE" <<'PY'
 import pathlib
 import sys
@@ -88,7 +91,9 @@ PY
   cd "$ROOT/dist"
   sha256sum "$(basename "$ARCHIVE")" > "$(basename "$ARCHIVE").sha256"
   sha256sum "$(basename "$CLOUD_ARCHIVE")" > "$(basename "$CLOUD_ARCHIVE").sha256"
+  sha256sum "$(basename "$CHROME_ARCHIVE")" > "$(basename "$CHROME_ARCHIVE").sha256"
 )
 
 echo "Release created: $ARCHIVE"
 echo "Cloudflare package created: $CLOUD_ARCHIVE"
+echo "Chrome extension package created: $CHROME_ARCHIVE"
