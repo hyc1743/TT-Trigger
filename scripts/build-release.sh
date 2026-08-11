@@ -23,7 +23,7 @@ for raw_path in sys.argv[1:]:
     elif path.exists():
         path.unlink()
 PY
-mkdir -p "$STAGE/extension"
+mkdir -p "$STAGE/extension" "$STAGE/cloudflare"
 
 cd "$ROOT"
 go test ./...
@@ -44,6 +44,10 @@ cp windows/start.bat windows/stop.bat windows/configure.bat windows/status.bat \
   windows/config.example.json "$STAGE/"
 cp README.md "$STAGE/README.md"
 cp -R extension/. "$STAGE/extension/"
+cp cloudflare/package.json cloudflare/package-lock.json cloudflare/tsconfig.json \
+  cloudflare/wrangler.toml cloudflare/vitest.config.ts cloudflare/README.md \
+  cloudflare/deploy.ps1 "$STAGE/cloudflare/"
+cp -R cloudflare/src cloudflare/scripts cloudflare/test "$STAGE/cloudflare/"
 
 python3 - "$STAGE" "$ARCHIVE" "$VERSION" <<'PY'
 import pathlib

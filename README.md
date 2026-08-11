@@ -146,19 +146,32 @@ python invoke-trigger.py --config C:\path\client.json --symbol "BG-P:SIREN/USDT+
 
 ### 自部署Cloudflare Worker
 
-源码位于 [`cloudflare/`](cloudflare/README.md)，使用Workers Free和Durable Objects。
+源码位于 [`cloudflare/`](cloudflare/README.md)，使用Workers Free和Durable Objects。完整的截图无关、可逐条复制执行的部署说明请阅读 **[Cloudflare Relay部署指南](cloudflare/README.md)**；Windows发布包中也已包含整个 `cloudflare` 目录。
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/hyc1743/TT-Trigger/tree/main/cloudflare)
 
-推荐使用引导脚本，以便自动生成管理员Token：
+Windows快速部署步骤：
 
 ```powershell
-cd cloudflare
+cd C:\你解压的位置\cloudflare
 npm install
-.\deploy.ps1
+powershell -ExecutionPolicy Bypass -File .\deploy.ps1
 ```
 
-默认 `first_device` 模式只允许第一个插件注册并立即关闭注册。共享服务应改为 `activation_required` 并用管理员CLI生成一次性激活码：
+部署期间浏览器会要求登录Cloudflare。成功后保存PowerShell输出的：
+
+1. `https://*.workers.dev` Worker URL；
+2. 管理员Token。
+
+先检查服务：
+
+```powershell
+Invoke-RestMethod https://你的Worker地址/health
+```
+
+然后在插件中选择“云端 E2EE”，填写Worker根地址，首次自部署的激活码留空，点击“注册并连接”。默认 `first_device` 模式会在首个设备注册后关闭无激活码注册。
+
+需要注册更多Chrome设备时，将 `wrangler.toml` 中的 `ENROLLMENT_MODE` 改为 `activation_required`，重新运行 `npx wrangler deploy`，再生成一次性激活码：
 
 ```powershell
 $env:TT_RELAY_URL='https://relay.example.workers.dev'
