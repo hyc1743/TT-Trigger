@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import json
 import os
+import pathlib
 import secrets
 import sys
 import time
@@ -17,6 +18,10 @@ import urllib.parse
 import urllib.request
 import uuid
 from typing import Optional
+
+
+VERSION = "3.1.0"
+DEFAULT_CONFIG = pathlib.Path(__file__).resolve().with_name("config.json")
 
 
 def base64url_encode(value: bytes) -> str:
@@ -47,6 +52,54 @@ def webhook_url(base_url: str) -> str:
     ):
         raise ValueError("Base URL 必须是 http(s)://主机[:端口]，不能包含路径、账号或查询参数")
     return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, "/webhook", "", ""))
+
+
+def load_config(path: str) -> dict:
+    try:
+        with open(path, "r", encoding="utf-8-sig") as stream:
+            value = json.load(stream)
+    except FileNotFoundError as exc:
+        raise ValueError(f"找不到配置文件：{path}") from exc
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"无法读取配置文件 {path}：{exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError("config.json 顶层必须是JSON对象")
+    return value
+
+
+def infer_base_url(config: dict) -> str:
+    deployment = config.get("deployment")
+    if not isinstance(deployment, dict):
+        raise ValueError("config.json 尚未包含deployment，请先运行start.bat或configure.bat")
+    mode = deployment.get("mode")
+    if mode == "public_caddy":
+        domain = deployment.get("domain")
+        if not isinstance(domain, str) or not domain:
+            raise ValueError("公网模式缺少deployment.domain")
+        return f"https://{domain}"
+    if mode == "local_tailscale":
+        listen = config.get("api_listen", "127.0.0.1:8788")
+        if not isinstance(listen, str) or not listen:
+            raise ValueError("config.json 中的api_listen无效")
+        return f"http://{listen}"
+    raise ValueError("config.json 中的deployment.mode无效")
+
+
+def resolve_credentials(config: dict, key_id: Optional[str], secret: Optional[str]) -> tuple[str, str]:
+    keys = config.get("hmac_keys")
+    if not isinstance(keys, list) or not keys:
+        keys = []
+    selected_id = key_id.strip() if key_id else ""
+    if not selected_id and keys and isinstance(keys[0], dict):
+        selected_id = str(keys[0].get("id", "")).strip()
+    if not selected_id:
+        raise ValueError("没有可用的keyId，请检查config.json或提供--key-id")
+    if secret:
+        return selected_id, secret.strip()
+    for key in keys:
+        if isinstance(key, dict) and key.get("id") == selected_id and isinstance(key.get("secret"), str):
+            return selected_id, key["secret"].strip()
+    raise ValueError(f"config.json 中找不到keyId {selected_id!r} 的secret")
 
 
 def build_signed_request(
@@ -89,14 +142,15 @@ def build_signed_request(
             "X-TT-Timestamp": timestamp_text,
             "X-TT-Nonce": nonce,
             "X-TT-Signature": signature,
-            "User-Agent": "TT-Trigger-Python/3.0.1",
+            "User-Agent": f"TT-Trigger-Python/{VERSION}",
         },
     )
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="调用 TT-Trigger HMAC webhook")
-    parser.add_argument("--base-url", required=True, help="例如 http://127.0.0.1:8788")
+    parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="默认读取脚本同目录的config.json")
+    parser.add_argument("--base-url", help="覆盖config.json推断的地址，例如Tailscale地址")
     parser.add_argument("--symbol", required=True, help="要填写的 symbol")
     parser.add_argument("--add-pair", action="store_true", help="填写后等待并点击添加交易对")
     parser.add_argument("--key-id", default=os.getenv("TT_KEY_ID"), help="默认读取 TT_KEY_ID")
@@ -107,17 +161,15 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    if not args.key_id:
-        print("错误：请通过 --key-id 或 TT_KEY_ID 提供 keyId。", file=sys.stderr)
-        return 2
-    if not args.secret:
-        print("错误：请通过 --secret 或 TT_HMAC_SECRET 提供 HMAC secret。", file=sys.stderr)
-        return 2
     try:
+        needs_config = not (args.base_url and args.key_id and args.secret)
+        config = load_config(args.config) if needs_config else {}
+        key_id, secret = resolve_credentials(config, args.key_id, args.secret)
+        base_url = args.base_url or infer_base_url(config)
         request = build_signed_request(
-            base_url=args.base_url,
-            key_id=args.key_id,
-            secret=args.secret,
+            base_url=base_url,
+            key_id=key_id,
+            secret=secret,
             symbol=args.symbol,
             add_pair=args.add_pair,
         )

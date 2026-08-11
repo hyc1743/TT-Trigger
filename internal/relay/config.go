@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/mail"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -24,13 +26,22 @@ type HMACKey struct {
 	Secret string `json:"secret"`
 }
 
+type DeploymentConfig struct {
+	Mode      string `json:"mode"`
+	Domain    string `json:"domain,omitempty"`
+	ACMEEmail string `json:"acme_email,omitempty"`
+}
+
+var domainPattern = regexp.MustCompile(`(?i)^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$`)
+
 type Config struct {
-	ExtensionListen         string    `json:"extension_listen"`
-	APIListen               string    `json:"api_listen"`
-	ExtensionToken          string    `json:"extension_token"`
-	HMACKeys                []HMACKey `json:"hmac_keys"`
-	SignatureMaxSkewSeconds int       `json:"signature_max_skew_seconds"`
-	TriggerTimeoutMS        int       `json:"trigger_timeout_ms"`
+	ExtensionListen         string            `json:"extension_listen"`
+	APIListen               string            `json:"api_listen"`
+	ExtensionToken          string            `json:"extension_token"`
+	HMACKeys                []HMACKey         `json:"hmac_keys"`
+	SignatureMaxSkewSeconds int               `json:"signature_max_skew_seconds"`
+	TriggerTimeoutMS        int               `json:"trigger_timeout_ms"`
+	Deployment              *DeploymentConfig `json:"deployment,omitempty"`
 
 	LegacyToken         string `json:"token,omitempty"`
 	LegacyListen        string `json:"listen,omitempty"`
@@ -75,27 +86,25 @@ func DefaultConfig() (Config, error) {
 	}, nil
 }
 
-// EnsureConfig creates a new configuration or migrates a pre-3.0 configuration.
+// EnsureConfig creates a configuration and migrates both pre-3.0 credentials
+// and the pre-3.1 standalone deployment.json file.
 func EnsureConfig(path string) (Config, bool, error) {
 	data, err := os.ReadFile(path)
+	created := false
+	var cfg Config
 	if errors.Is(err, os.ErrNotExist) {
-		cfg, genErr := DefaultConfig()
+		generated, genErr := DefaultConfig()
 		if genErr != nil {
 			return Config{}, false, genErr
 		}
-		if err := saveConfig(path, cfg); err != nil {
-			return Config{}, false, err
-		}
-		return cfg, true, nil
-	}
-	if err != nil {
+		cfg = generated
+		created = true
+	} else if err != nil {
 		return Config{}, false, err
-	}
-
-	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	} else if err := json.Unmarshal(data, &cfg); err != nil {
 		return Config{}, false, fmt.Errorf("decode config: %w", err)
 	}
+
 	changed := cfg.normalize()
 	if cfg.ExtensionToken == "" && cfg.LegacyToken != "" {
 		cfg.ExtensionToken = cfg.LegacyToken
@@ -114,11 +123,31 @@ func EnsureConfig(path string) (Config, bool, error) {
 		cfg.LegacyListen = ""
 		changed = true
 	}
+	legacyDeploymentPath := filepath.Join(filepath.Dir(path), "deployment.json")
+	legacyDeploymentMigrated := false
+	if cfg.Deployment == nil {
+		legacyData, readErr := os.ReadFile(legacyDeploymentPath)
+		if readErr == nil {
+			var deployment DeploymentConfig
+			if err := json.Unmarshal(legacyData, &deployment); err != nil {
+				return Config{}, false, fmt.Errorf("decode legacy deployment.json: %w", err)
+			}
+			cfg.Deployment = &deployment
+			legacyDeploymentMigrated = true
+			changed = true
+		} else if !errors.Is(readErr, os.ErrNotExist) {
+			return Config{}, false, fmt.Errorf("read legacy deployment.json: %w", readErr)
+		}
+	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, false, err
 	}
-	if changed {
-		backup := path + ".pre-3.0.bak"
+	if !created && changed {
+		backupSuffix := ".pre-3.0.bak"
+		if legacyDeploymentMigrated {
+			backupSuffix = ".pre-3.1.bak"
+		}
+		backup := path + backupSuffix
 		if _, statErr := os.Stat(backup); errors.Is(statErr, os.ErrNotExist) {
 			if err := os.WriteFile(backup, data, 0o600); err != nil {
 				return Config{}, false, fmt.Errorf("back up configuration: %w", err)
@@ -126,11 +155,18 @@ func EnsureConfig(path string) (Config, bool, error) {
 		} else if statErr != nil {
 			return Config{}, false, fmt.Errorf("check configuration backup: %w", statErr)
 		}
+	}
+	if created || changed {
 		if err := saveConfig(path, cfg); err != nil {
 			return Config{}, false, err
 		}
 	}
-	return cfg, changed, nil
+	if legacyDeploymentMigrated {
+		if err := os.Remove(legacyDeploymentPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return Config{}, false, fmt.Errorf("remove migrated deployment.json: %w", err)
+		}
+	}
+	return cfg, created || changed, nil
 }
 
 func LoadConfig(path string) (Config, error) {
@@ -222,6 +258,26 @@ func (c Config) Validate() error {
 	}
 	if c.TriggerTimeoutMS < 250 || c.TriggerTimeoutMS > 60000 {
 		return errors.New("trigger_timeout_ms must be between 250 and 60000")
+	}
+	if c.Deployment != nil {
+		switch c.Deployment.Mode {
+		case "local_tailscale":
+			if c.Deployment.Domain != "" || c.Deployment.ACMEEmail != "" {
+				return errors.New("local_tailscale deployment must not contain domain or acme_email")
+			}
+		case "public_caddy":
+			if len(c.Deployment.Domain) > 253 || !domainPattern.MatchString(c.Deployment.Domain) {
+				return errors.New("public_caddy deployment must contain a valid ASCII domain")
+			}
+			if c.Deployment.ACMEEmail != "" {
+				address, err := mail.ParseAddress(c.Deployment.ACMEEmail)
+				if err != nil || address.Address != c.Deployment.ACMEEmail {
+					return errors.New("deployment acme_email is invalid")
+				}
+			}
+		default:
+			return errors.New("deployment mode must be local_tailscale or public_caddy")
+		}
 	}
 	return nil
 }

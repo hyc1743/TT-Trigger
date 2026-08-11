@@ -4,6 +4,7 @@ import hmac
 import importlib.util
 import json
 import pathlib
+import tempfile
 import unittest
 
 
@@ -65,6 +66,25 @@ class PythonClientTests(unittest.TestCase):
             )
         self.assertEqual(CLIENT.webhook_url("http://127.0.0.1:8788"), "http://127.0.0.1:8788/webhook")
         self.assertEqual(len(CLIENT.base64url_decode(valid_secret)), 32)
+
+    def test_reuses_integrated_config(self):
+        secret = base64.urlsafe_b64encode(b"x" * 32).rstrip(b"=").decode()
+        config = {
+            "api_listen": "127.0.0.1:8788",
+            "hmac_keys": [{"id": "default", "secret": secret}],
+            "deployment": {"mode": "local_tailscale"},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = pathlib.Path(directory) / "config.json"
+            path.write_text(json.dumps(config), encoding="utf-8")
+            loaded = CLIENT.load_config(str(path))
+        self.assertEqual(CLIENT.infer_base_url(loaded), "http://127.0.0.1:8788")
+        self.assertEqual(CLIENT.resolve_credentials(loaded, None, None), ("default", secret))
+
+        loaded["deployment"] = {"mode": "public_caddy", "domain": "trigger.example.com"}
+        self.assertEqual(CLIENT.infer_base_url(loaded), "https://trigger.example.com")
+        with self.assertRaises(ValueError):
+            CLIENT.resolve_credentials(loaded, "missing", None)
 
 
 if __name__ == "__main__":

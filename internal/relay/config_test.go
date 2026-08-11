@@ -2,6 +2,7 @@ package relay
 
 import (
 	"encoding/base64"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,5 +90,62 @@ func TestLegacyConfigMigration(t *testing.T) {
 	}
 	if strings.Contains(string(stored), `"token"`) || strings.Contains(string(stored), `"listen"`) {
 		t.Fatalf("legacy fields remain: %s", stored)
+	}
+}
+
+func TestStandaloneDeploymentMigration(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	cfg := validTestConfig()
+	if err := SaveConfig(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	legacyPath := filepath.Join(dir, "deployment.json")
+	legacy := `{"mode":"public_caddy","domain":"trigger.example.com","acme_email":"admin@example.com"}`
+	if err := os.WriteFile(legacyPath, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	migrated, changed, err := EnsureConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed || migrated.Deployment == nil || migrated.Deployment.Mode != "public_caddy" || migrated.Deployment.Domain != "trigger.example.com" {
+		t.Fatalf("deployment was not migrated: %#v", migrated.Deployment)
+	}
+	if _, err := os.Stat(legacyPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("legacy deployment file remains: %v", err)
+	}
+	if _, err := os.Stat(path + ".pre-3.1.bak"); err != nil {
+		t.Fatal("pre-3.1 config backup missing")
+	}
+	reloaded, err := LoadConfig(path)
+	if err != nil || reloaded.Deployment == nil || reloaded.Deployment.ACMEEmail != "admin@example.com" {
+		t.Fatalf("integrated deployment did not reload: %#v %v", reloaded.Deployment, err)
+	}
+}
+
+func TestDeploymentValidation(t *testing.T) {
+	valid := validTestConfig()
+	valid.Deployment = &DeploymentConfig{Mode: "local_tailscale"}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("local deployment rejected: %v", err)
+	}
+	valid.Deployment = &DeploymentConfig{Mode: "public_caddy", Domain: "trigger.example.com", ACMEEmail: "admin@example.com"}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("public deployment rejected: %v", err)
+	}
+	for _, deployment := range []*DeploymentConfig{
+		{Mode: "unknown"},
+		{Mode: "public_caddy", Domain: "https://example.com/"},
+		{Mode: "public_caddy", Domain: "example.com\nattack"},
+		{Mode: "public_caddy", Domain: "example.com", ACMEEmail: "a@example.com\nattack"},
+		{Mode: "local_tailscale", Domain: "example.com"},
+	} {
+		cfg := validTestConfig()
+		cfg.Deployment = deployment
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("invalid deployment accepted: %#v", deployment)
+		}
 	}
 }

@@ -9,5 +9,8 @@
     }
   ],
   "signature_max_skew_seconds": 30,
-  "trigger_timeout_ms": 5000
+  "trigger_timeout_ms": 5000,
+  "deployment": {
+    "mode": "local_tailscale"
+  }
 }

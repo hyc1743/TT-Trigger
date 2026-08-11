@@ -2,7 +2,7 @@
 
 TT-Trigger 是一个 Windows x64 本地服务和 Chrome Manifest V3 插件。外部程序向服务发送经过 HMAC-SHA256 签名的 `POST /webhook` 请求后，插件会在当前 `https://taoli.tools/*` 页面填写交易对，并可选择等待 1000ms 后点击 **Add Pair / 添加交易对**。
 
-当前版本：**3.0.1**。从3.0开始，旧的 `GET /trigger?token=...` 和 Bearer Token 接口已移除。
+当前版本：**3.1.0**。从3.0开始，旧的 `GET /trigger?token=...` 和 Bearer Token 接口已移除。
 
 ## 工作方式
 
@@ -18,7 +18,7 @@ TT-Trigger 是一个 Windows x64 本地服务和 Chrome Manifest V3 插件。外
 
 ### 1. 下载并解压
 
-下载 `dist/TT-Trigger-3.0.1-windows-x64.zip`，完整解压到一个可长期保留的目录。运行服务不需要安装 Go、Node.js 或 Caddy；只有使用Python调用示例时才需要Python 3.8+。
+下载 `dist/TT-Trigger-3.1.0-windows-x64.zip`，完整解压到一个可长期保留的目录。运行服务不需要安装 Go、Node.js 或 Caddy；只有使用Python调用示例时才需要Python 3.8+。
 
 ### 2. 启动并选择方案
 
@@ -27,7 +27,7 @@ TT-Trigger 是一个 Windows x64 本地服务和 Chrome Manifest V3 插件。外
 1. **localhost + 可选 Tailscale（HTTP）**
 2. **公网域名 + Caddy + Let's Encrypt（HTTPS）**
 
-选择保存在 `deployment.json`，以后双击 `start.bat` 会直接按原方案启动。要更换方案，运行 `configure.bat`。
+运行方案和全部服务配置统一保存在 `config.json`，不再生成 `deployment.json`。以后双击 `start.bat` 会直接按原方案启动；要更换方案，运行 `configure.bat`。
 
 首次运行会在窗口中显示：
 
@@ -114,24 +114,29 @@ $env:TT_HMAC_SECRET = 'config.json 中对应的 secret'
 
 ### Python调用示例
 
-发布包同时包含只使用Python标准库的 `invoke-trigger.py`：
+发布包同时包含只使用Python标准库的 `invoke-trigger.py`。在发布目录运行时，它会自动读取同目录的 `config.json`、选择第一把HMAC密钥，并根据 `deployment` 推断localhost或公网地址，因此只需要提供symbol：
 
 ```powershell
-$env:TT_KEY_ID = 'default'
-$env:TT_HMAC_SECRET = 'config.json 中对应的 secret'
-
 python .\invoke-trigger.py `
-  --base-url 'https://trigger.example.com' `
   --symbol 'BG-P:SIREN/USDT+OD-S:SIREN/USDT' `
   --add-pair
 ```
 
-也可以直接传入密钥，但密钥可能被保留在命令历史中：
+指定其他配置文件或keyId：
+
+```powershell
+python .\invoke-trigger.py `
+  --config 'D:\TT-Trigger\config.json' `
+  --key-id 'caller-2' `
+  --symbol 'BTC'
+```
+
+从另一台Tailscale设备调用时，不建议复制包含插件Token和全部密钥的完整 `config.json`。应只传递分配给该调用方的keyId和secret，并覆盖服务地址：
 
 ```bash
 python invoke-trigger.py \
-  --base-url http://127.0.0.1:8788 \
-  --key-id default \
+  --base-url http://100.x.x.x:8788 \
+  --key-id remote-caller \
   --secret 'YOUR_BASE64URL_SECRET' \
   --symbol BTC
 ```
@@ -239,13 +244,29 @@ X-TT-Signature: 64位小写十六进制字符串
     }
   ],
   "signature_max_skew_seconds": 30,
-  "trigger_timeout_ms": 5000
+  "trigger_timeout_ms": 5000,
+  "deployment": {
+    "mode": "local_tailscale"
+  }
+}
+```
+
+公网模式下，`deployment` 示例为：
+
+```json
+{
+  "mode": "public_caddy",
+  "domain": "trigger.example.com",
+  "acme_email": "admin@example.com"
 }
 ```
 
 `api_listen` 和 `extension_listen` 只允许回环地址。Tailscale地址由启动脚本作为临时参数传入，不能通过配置文件改成普通局域网或公网地址。
 
-升级旧版本时，原 `token` 会保留为 `extension_token`，同时生成新的HMAC密钥；旧文件备份为 `config.json.pre-3.0.bak`。
+升级旧版本时：
+
+- 原 `token` 会保留为 `extension_token`，同时生成新的HMAC密钥；旧文件备份为 `config.json.pre-3.0.bak`。
+- 独立的 `deployment.json` 会自动合并到 `config.json.deployment`，随后删除；合并前配置备份为 `config.json.pre-3.1.bak`。
 
 ## 从源码构建
 
@@ -256,12 +277,12 @@ go test ./...
 python3 -m unittest discover -s tests -p '*_test.py'
 npm run test:extension
 npm run check:extension
-VERSION=3.0.1 ./scripts/build-release.sh
+VERSION=3.1.0 ./scripts/build-release.sh
 ```
 
 输出：
 
 ```text
-dist/TT-Trigger-3.0.1-windows-x64.zip
-dist/TT-Trigger-3.0.1-windows-x64.zip.sha256
+dist/TT-Trigger-3.1.0-windows-x64.zip
+dist/TT-Trigger-3.1.0-windows-x64.zip.sha256
 ```

@@ -7,7 +7,6 @@ $ErrorActionPreference = 'Stop'
 $HomeDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ServerExe = Join-Path $HomeDir 'tt-trigger-server.exe'
 $ConfigPath = Join-Path $HomeDir 'config.json'
-$DeploymentPath = Join-Path $HomeDir 'deployment.json'
 $RuntimeDir = Join-Path $HomeDir 'runtime'
 $LogsDir = Join-Path $HomeDir 'logs'
 $ServerPidFile = Join-Path $HomeDir 'tt-trigger.pid'
@@ -45,7 +44,7 @@ function Stop-All {
 function Protect-Config {
     try {
         $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-        foreach ($path in @($ConfigPath, "$ConfigPath.pre-3.0.bak")) {
+        foreach ($path in @($ConfigPath, "$ConfigPath.pre-3.0.bak", "$ConfigPath.pre-3.1.bak")) {
             if (Test-Path $path) {
                 & icacls.exe $path /inheritance:r /grant:r "${identity}:(F)" /grant:r 'SYSTEM:(F)' 2>$null | Out-Null
             }
@@ -63,7 +62,13 @@ function Initialize-Config {
 }
 
 function Save-Deployment($Value) {
-    Write-Utf8NoBom $DeploymentPath (($Value | ConvertTo-Json -Depth 4) + "`n")
+    try { $config = Get-Content $ConfigPath -Raw | ConvertFrom-Json }
+    catch { throw 'config.json 无法解析。' }
+    $config | Add-Member -NotePropertyName deployment -NotePropertyValue $Value -Force
+    $temporary = "$ConfigPath.tmp"
+    Write-Utf8NoBom $temporary (($config | ConvertTo-Json -Depth 10) + "`n")
+    Move-Item -LiteralPath $temporary -Destination $ConfigPath -Force
+    Protect-Config
 }
 
 function Configure-Mode {
@@ -90,9 +95,13 @@ function Configure-Mode {
 }
 
 function Load-Deployment {
-    if (-not (Test-Path $DeploymentPath)) { Configure-Mode }
-    try { return Get-Content $DeploymentPath -Raw | ConvertFrom-Json }
-    catch { throw 'deployment.json 无法解析，请运行 configure.bat 重新配置。' }
+    try { $config = Get-Content $ConfigPath -Raw | ConvertFrom-Json }
+    catch { throw 'config.json 无法解析，请运行 configure.bat 重新配置。' }
+    if (-not $config.deployment -or -not $config.deployment.mode) {
+        Configure-Mode
+        $config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+    }
+    return $config.deployment
 }
 
 function Find-TailscaleIPv4 {
@@ -232,7 +241,7 @@ function Start-All {
             Start-Caddy $deployment | Out-Null
             Write-Host 'TT-Trigger 与 Caddy 已启动。'
             Write-Host "Public API: https://$($deployment.domain)/webhook"
-        } else { throw 'deployment.json 中的 mode 无效。' }
+        } else { throw 'config.json 中 deployment.mode 无效。' }
         Write-Host "日志目录: $LogsDir"
     } catch {
         Stop-All
@@ -245,10 +254,12 @@ function Show-Status {
     $caddyPid = Get-LivePid $CaddyPidFile
     if ($serverPid) { Write-Host "TT-Trigger: running (PID $serverPid)" } else { Write-Host 'TT-Trigger: stopped' }
     if ($caddyPid) { Write-Host "Caddy: running (PID $caddyPid)" } else { Write-Host 'Caddy: stopped' }
-    if (Test-Path $DeploymentPath) {
-        $d = Load-Deployment
+    if (Test-Path $ConfigPath) {
+        try { $d = (Get-Content $ConfigPath -Raw | ConvertFrom-Json).deployment } catch { $d = $null }
+        if ($d) {
         Write-Host "Mode: $($d.mode)"
         if ($d.domain) { Write-Host "Domain: $($d.domain)" }
+        }
     }
 }
 
