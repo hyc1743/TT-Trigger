@@ -15,7 +15,7 @@ let authRejected = false;
 let status = {
   state: 'unconfigured',
   relayUrl: '',
-  message: '请先配置 Token',
+  message: '请先配置插件连接 Token',
   lastConnectedAt: null
 };
 
@@ -64,7 +64,7 @@ async function restartConnection() {
     return;
   }
   if (typeof settings.token !== 'string' || settings.token.trim().length < 32) {
-    publishStatus({ state: 'unconfigured', relayUrl: validation.url, message: '请配置服务生成的 Token' });
+    publishStatus({ state: 'unconfigured', relayUrl: validation.url, message: '请配置服务生成的插件连接 Token' });
     return;
   }
 
@@ -95,7 +95,7 @@ function openConnection(currentGeneration, relayUrl, token) {
     if (message.type === 'auth_result') {
       if (!message.ok) {
         authRejected = true;
-        publishStatus({ state: 'auth_error', relayUrl, message: 'Token 验证失败' });
+        publishStatus({ state: 'auth_error', relayUrl, message: '插件 Token 验证失败' });
         ws.close(1008, 'authentication failed');
         return;
       }

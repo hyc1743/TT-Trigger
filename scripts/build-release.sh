@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="${VERSION:-2.1.1}"
+VERSION="${VERSION:-3.0.0}"
 STAGE="$ROOT/dist/TT-Trigger-${VERSION}-windows-x64"
 ARCHIVE="$ROOT/dist/TT-Trigger-${VERSION}-windows-x64.zip"
 
@@ -31,7 +31,9 @@ CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
   -o "$STAGE/tt-trigger-server.exe" \
   ./cmd/tt-trigger-server
 
-cp windows/start.bat windows/stop.bat windows/config.example.json "$STAGE/"
+cp windows/start.bat windows/stop.bat windows/configure.bat windows/status.bat \
+  windows/manage-keys.bat windows/tt-trigger.ps1 windows/invoke-trigger.ps1 \
+  windows/config.example.json "$STAGE/"
 cp README.md "$STAGE/README.md"
 cp -R extension/. "$STAGE/extension/"
 
@@ -50,7 +52,7 @@ def write_tree(destination, root, relative_to):
             if path.is_file():
                 output.write(path, path.relative_to(relative_to))
 
-write_tree(stage / f"TT-Trigger-Chrome-{version}.zip", stage / "extension", stage)
+write_tree(stage / f"TT-Trigger-Chrome-{version}.zip", stage / "extension", stage / "extension")
 write_tree(archive, stage, stage.parent)
 PY
 

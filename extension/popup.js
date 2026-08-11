@@ -4,7 +4,7 @@ const labels = {
   connected: '已连接',
   connecting: '正在连接',
   disconnected: '连接断开',
-  auth_error: 'Token 错误',
+  auth_error: '插件 Token 错误',
   unconfigured: '尚未配置'
 };
 
@@ -47,7 +47,7 @@ tokenForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const token = tokenInput.value.trim();
   if (token.length < 32) {
-    saveStatus.textContent = 'Token 至少需要 32 个字符';
+    saveStatus.textContent = '插件 Token 至少需要 32 个字符';
     tokenInput.focus();
     return;
   }

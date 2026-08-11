@@ -1,6 +1,10 @@
 config.json
+deployment.json
+*.pre-3.0.bak
 tt-trigger.pid
+caddy.pid
 logs/
+runtime/
 windows/tt-trigger-server.exe
 dist/
 *.log

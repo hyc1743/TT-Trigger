@@ -13,70 +13,124 @@ import (
 )
 
 const (
-	defaultExtensionListen  = "127.0.0.1:8787"
-	defaultAPIListen        = "127.0.0.1:8788"
-	defaultTriggerTimeoutMS = 5000
+	defaultExtensionListen      = "127.0.0.1:8787"
+	defaultAPIListen            = "127.0.0.1:8788"
+	defaultTriggerTimeoutMS     = 5000
+	defaultSignatureMaxSkewSecs = 30
 )
 
+type HMACKey struct {
+	ID     string `json:"id"`
+	Secret string `json:"secret"`
+}
+
 type Config struct {
-	ExtensionListen     string `json:"extension_listen"`
-	APIListen           string `json:"api_listen"`
-	Token               string `json:"token"`
-	TriggerTimeoutMS    int    `json:"trigger_timeout_ms"`
+	ExtensionListen         string    `json:"extension_listen"`
+	APIListen               string    `json:"api_listen"`
+	ExtensionToken          string    `json:"extension_token"`
+	HMACKeys                []HMACKey `json:"hmac_keys"`
+	SignatureMaxSkewSeconds int       `json:"signature_max_skew_seconds"`
+	TriggerTimeoutMS        int       `json:"trigger_timeout_ms"`
+
+	LegacyToken         string `json:"token,omitempty"`
 	LegacyListen        string `json:"listen,omitempty"`
 	AdditionalAPIListen string `json:"-"`
 }
 
+func randomSecret() (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+func GenerateHMACKey(id string) (HMACKey, error) {
+	if !validKeyID(id) {
+		return HMACKey{}, errors.New("key id must contain 1-64 letters, digits, dots, underscores, or hyphens")
+	}
+	secret, err := randomSecret()
+	if err != nil {
+		return HMACKey{}, err
+	}
+	return HMACKey{ID: id, Secret: secret}, nil
+}
+
 func DefaultConfig() (Config, error) {
-	tokenBytes := make([]byte, 32)
-	if _, err := rand.Read(tokenBytes); err != nil {
-		return Config{}, fmt.Errorf("generate token: %w", err)
+	extensionToken, err := randomSecret()
+	if err != nil {
+		return Config{}, fmt.Errorf("generate extension token: %w", err)
+	}
+	hmacSecret, err := randomSecret()
+	if err != nil {
+		return Config{}, fmt.Errorf("generate HMAC secret: %w", err)
 	}
 	return Config{
-		ExtensionListen:  defaultExtensionListen,
-		APIListen:        defaultAPIListen,
-		Token:            base64.RawURLEncoding.EncodeToString(tokenBytes),
-		TriggerTimeoutMS: defaultTriggerTimeoutMS,
+		ExtensionListen:         defaultExtensionListen,
+		APIListen:               defaultAPIListen,
+		ExtensionToken:          extensionToken,
+		HMACKeys:                []HMACKey{{ID: "default", Secret: hmacSecret}},
+		SignatureMaxSkewSeconds: defaultSignatureMaxSkewSecs,
+		TriggerTimeoutMS:        defaultTriggerTimeoutMS,
 	}, nil
 }
 
+// EnsureConfig creates a new configuration or migrates a pre-3.0 configuration.
 func EnsureConfig(path string) (Config, bool, error) {
-	cfg, err := LoadConfig(path)
-	if err == nil {
-		return cfg, false, nil
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		cfg, genErr := DefaultConfig()
+		if genErr != nil {
+			return Config{}, false, genErr
+		}
+		if err := saveConfig(path, cfg); err != nil {
+			return Config{}, false, err
+		}
+		return cfg, true, nil
 	}
-	if !errors.Is(err, os.ErrNotExist) {
+	if err != nil {
 		return Config{}, false, err
 	}
 
-	cfg, err = DefaultConfig()
-	if err != nil {
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return Config{}, false, fmt.Errorf("decode config: %w", err)
+	}
+	changed := cfg.normalize()
+	if cfg.ExtensionToken == "" && cfg.LegacyToken != "" {
+		cfg.ExtensionToken = cfg.LegacyToken
+		changed = true
+	}
+	if len(cfg.HMACKeys) == 0 {
+		secret, genErr := randomSecret()
+		if genErr != nil {
+			return Config{}, false, fmt.Errorf("generate HMAC secret: %w", genErr)
+		}
+		cfg.HMACKeys = []HMACKey{{ID: "default", Secret: secret}}
+		changed = true
+	}
+	if cfg.LegacyToken != "" || cfg.LegacyListen != "" {
+		cfg.LegacyToken = ""
+		cfg.LegacyListen = ""
+		changed = true
+	}
+	if err := cfg.Validate(); err != nil {
 		return Config{}, false, err
 	}
-	if dir := filepath.Dir(path); dir != "." {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			return Config{}, false, fmt.Errorf("create config directory: %w", err)
+	if changed {
+		backup := path + ".pre-3.0.bak"
+		if _, statErr := os.Stat(backup); errors.Is(statErr, os.ErrNotExist) {
+			if err := os.WriteFile(backup, data, 0o600); err != nil {
+				return Config{}, false, fmt.Errorf("back up configuration: %w", err)
+			}
+		} else if statErr != nil {
+			return Config{}, false, fmt.Errorf("check configuration backup: %w", statErr)
+		}
+		if err := saveConfig(path, cfg); err != nil {
+			return Config{}, false, err
 		}
 	}
-
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return Config{}, false, fmt.Errorf("encode config: %w", err)
-	}
-	data = append(data, '\n')
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if err != nil {
-		if errors.Is(err, os.ErrExist) {
-			loaded, loadErr := LoadConfig(path)
-			return loaded, false, loadErr
-		}
-		return Config{}, false, fmt.Errorf("create config: %w", err)
-	}
-	defer f.Close()
-	if _, err := f.Write(data); err != nil {
-		return Config{}, false, fmt.Errorf("write config: %w", err)
-	}
-	return cfg, true, nil
+	return cfg, changed, nil
 }
 
 func LoadConfig(path string) (Config, error) {
@@ -85,9 +139,8 @@ func LoadConfig(path string) (Config, error) {
 		return Config{}, err
 	}
 	var cfg Config
-	decErr := json.Unmarshal(data, &cfg)
-	if decErr != nil {
-		return Config{}, fmt.Errorf("decode config: %w", decErr)
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return Config{}, fmt.Errorf("decode config: %w", err)
 	}
 	cfg.normalize()
 	if err := cfg.Validate(); err != nil {
@@ -96,11 +149,44 @@ func LoadConfig(path string) (Config, error) {
 	return cfg, nil
 }
 
+func SaveConfig(path string, cfg Config) error {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	return saveConfig(path, cfg)
+}
+
+func saveConfig(path string, cfg Config) error {
+	if dir := filepath.Dir(path); dir != "." {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return fmt.Errorf("create config directory: %w", err)
+		}
+	}
+	cfg.LegacyToken = ""
+	cfg.LegacyListen = ""
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode config: %w", err)
+	}
+	data = append(data, '\n')
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	_ = os.Chmod(tmp, 0o600)
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("replace config: %w", err)
+	}
+	_ = os.Chmod(path, 0o600)
+	return nil
+}
+
 func (c Config) Validate() error {
 	if err := validateLoopbackListen("extension_listen", c.ExtensionListen); err != nil {
 		return err
 	}
-	if err := validateAPIListen(c.APIListen); err != nil {
+	if err := validateLoopbackListen("api_listen", c.APIListen); err != nil {
 		return err
 	}
 	if c.ExtensionListen == c.APIListen {
@@ -114,8 +200,25 @@ func (c Config) Validate() error {
 			return errors.New("additional API listen address must be unique")
 		}
 	}
-	if len(c.Token) < 32 {
-		return errors.New("token must contain at least 32 characters")
+	if len(c.ExtensionToken) < 32 {
+		return errors.New("extension_token must contain at least 32 characters")
+	}
+	if len(c.HMACKeys) == 0 {
+		return errors.New("hmac_keys must contain at least one key")
+	}
+	seen := make(map[string]bool, len(c.HMACKeys))
+	for _, key := range c.HMACKeys {
+		if !validKeyID(key.ID) || seen[key.ID] {
+			return fmt.Errorf("invalid or duplicate HMAC key id %q", key.ID)
+		}
+		seen[key.ID] = true
+		decoded, err := base64.RawURLEncoding.DecodeString(key.Secret)
+		if err != nil || len(decoded) != 32 {
+			return fmt.Errorf("HMAC key %q secret must be 32 bytes encoded as unpadded Base64URL", key.ID)
+		}
+	}
+	if c.SignatureMaxSkewSeconds < 5 || c.SignatureMaxSkewSeconds > 300 {
+		return errors.New("signature_max_skew_seconds must be between 5 and 300")
 	}
 	if c.TriggerTimeoutMS < 250 || c.TriggerTimeoutMS > 60000 {
 		return errors.New("trigger_timeout_ms must be between 250 and 60000")
@@ -123,38 +226,54 @@ func (c Config) Validate() error {
 	return nil
 }
 
+func validKeyID(value string) bool {
+	if len(value) < 1 || len(value) > 64 {
+		return false
+	}
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || strings.ContainsRune("._-", r) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 func validateAPIListen(value string) error {
 	host, _, err := net.SplitHostPort(strings.TrimSpace(value))
 	if err != nil {
-		return fmt.Errorf("api_listen must be a host:port address: %w", err)
-	}
-	if host == "localhost" {
-		return nil
+		return fmt.Errorf("api listen must be a host:port address: %w", err)
 	}
 	ip := net.ParseIP(host)
 	if ip == nil {
-		return errors.New("api_listen must use an IP address")
-	}
-	if ip.IsLoopback() {
-		return nil
+		return errors.New("additional API listen must use an IP address")
 	}
 	_, tailscaleRange, _ := net.ParseCIDR("100.64.0.0/10")
 	if !tailscaleRange.Contains(ip) {
-		return errors.New("api_listen must use a loopback or Tailscale IPv4 address")
+		return errors.New("additional API listen must use a Tailscale IPv4 address")
 	}
 	return nil
 }
 
-func (c *Config) normalize() {
+func (c *Config) normalize() bool {
+	changed := false
 	if strings.TrimSpace(c.ExtensionListen) == "" {
 		c.ExtensionListen = defaultExtensionListen
+		changed = true
 	}
 	if strings.TrimSpace(c.APIListen) == "" {
 		c.APIListen = defaultAPIListen
+		changed = true
 	}
-	// Legacy versions used a single public listen address. It is intentionally
-	// ignored so upgrading cannot accidentally expose either endpoint publicly.
-	c.LegacyListen = ""
+	if c.SignatureMaxSkewSeconds == 0 {
+		c.SignatureMaxSkewSeconds = defaultSignatureMaxSkewSecs
+		changed = true
+	}
+	if c.TriggerTimeoutMS == 0 {
+		c.TriggerTimeoutMS = defaultTriggerTimeoutMS
+		changed = true
+	}
+	return changed
 }
 
 func validateLoopbackListen(name, value string) error {

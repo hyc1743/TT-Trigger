@@ -19,6 +19,9 @@ func main() {
 	configPath := flag.String("config", "config.json", "path to the JSON configuration file")
 	apiListen := flag.String("api-listen", "", "additional trigger API listen address")
 	initConfig := flag.Bool("init", false, "create a configuration file if it does not exist")
+	keyList := flag.Bool("key-list", false, "list configured HMAC key IDs")
+	keyAdd := flag.String("key-add", "", "create an HMAC key with this ID")
+	keyRemove := flag.String("key-remove", "", "remove the HMAC key with this ID")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 
@@ -28,16 +31,23 @@ func main() {
 	}
 
 	if *initConfig {
-		cfg, created, err := relay.EnsureConfig(*configPath)
+		cfg, changed, err := relay.EnsureConfig(*configPath)
 		if err != nil {
 			log.Fatalf("initialize configuration: %v", err)
 		}
-		if created {
-			fmt.Printf("Created %s\n", *configPath)
-			fmt.Printf("Webhook token: %s\n", cfg.Token)
+		if changed {
+			fmt.Printf("Created or migrated %s\n", *configPath)
+			fmt.Printf("Extension token: %s\n", cfg.ExtensionToken)
+			fmt.Printf("Default HMAC key ID: %s\n", cfg.HMACKeys[0].ID)
+			fmt.Printf("Default HMAC secret: %s\n", cfg.HMACKeys[0].Secret)
 		} else {
 			fmt.Printf("Configuration already exists: %s\n", *configPath)
 		}
+		return
+	}
+
+	if *keyList || *keyAdd != "" || *keyRemove != "" {
+		manageKeys(*configPath, *keyList, *keyAdd, *keyRemove)
 		return
 	}
 
@@ -76,4 +86,67 @@ func main() {
 			logger.Printf("shutdown error: %v", err)
 		}
 	}
+}
+
+func manageKeys(configPath string, list bool, add, remove string) {
+	cfg, err := relay.LoadConfig(configPath)
+	if err != nil {
+		log.Fatalf("load configuration: %v", err)
+	}
+	operations := 0
+	if list {
+		operations++
+	}
+	if add != "" {
+		operations++
+	}
+	if remove != "" {
+		operations++
+	}
+	if operations != 1 {
+		log.Fatal("choose exactly one of --key-list, --key-add, or --key-remove")
+	}
+	if list {
+		for _, key := range cfg.HMACKeys {
+			fmt.Println(key.ID)
+		}
+		return
+	}
+	if add != "" {
+		for _, key := range cfg.HMACKeys {
+			if key.ID == add {
+				log.Fatalf("HMAC key %q already exists", add)
+			}
+		}
+		key, err := relay.GenerateHMACKey(add)
+		if err != nil {
+			log.Fatalf("generate HMAC key: %v", err)
+		}
+		cfg.HMACKeys = append(cfg.HMACKeys, key)
+		if err := relay.SaveConfig(configPath, cfg); err != nil {
+			log.Fatalf("save configuration: %v", err)
+		}
+		fmt.Printf("Key ID: %s\nSecret: %s\n", key.ID, key.Secret)
+		return
+	}
+	if len(cfg.HMACKeys) == 1 {
+		log.Fatal("cannot remove the last HMAC key")
+	}
+	filtered := cfg.HMACKeys[:0]
+	found := false
+	for _, key := range cfg.HMACKeys {
+		if key.ID == remove {
+			found = true
+			continue
+		}
+		filtered = append(filtered, key)
+	}
+	if !found {
+		log.Fatalf("HMAC key %q was not found", remove)
+	}
+	cfg.HMACKeys = filtered
+	if err := relay.SaveConfig(configPath, cfg); err != nil {
+		log.Fatalf("save configuration: %v", err)
+	}
+	fmt.Printf("Removed HMAC key: %s\n", remove)
 }
