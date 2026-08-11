@@ -7,6 +7,73 @@ TT-Trigger 可以从外部程序触发 Chrome，在当前 `https://taoli.tools/*
 - **本地 / Tailscale**：Windows 本地服务接收带时间戳、nonce 和 HMAC-SHA256 的 `POST /webhook`。
 - **Cloudflare 云端 E2EE**：Chrome 插件直接连接 Cloudflare Worker；请求与执行结果只在调用方和插件中解密，不需要在电脑上运行本地服务。
 
+## ⚠️ 公共中继隐私政策（使用前必读）
+
+> [!IMPORTANT]
+> 插件默认填写的公共中继是 `https://tt-trigger.jwyhyc.workers.dev`。E2EE保护业务正文，但**不会隐藏网络IP、连接时间或稳定的随机设备标识**。如果不希望公共中继或Cloudflare处理这些网络元数据，请使用本地/Tailscale模式、自部署中继，或在Chrome和Python两端使用VPN/代理。
+
+以下说明针对本仓库v4.0.1公开实现及其默认配置。中继部署者在技术上可以修改Worker代码，因此“当前未记录”不等于部署者永远没有记录能力。
+
+### 中继部署者能够看到什么
+
+公共中继会分别接收Python调用方的HTTPS请求和Chrome插件设备的WebSocket连接。部署者和Cloudflare在网络层有能力观察：
+
+| 可见信息 | 说明 |
+|---|---|
+| Python调用方出口IP | `/trigger` 请求的公网IP；使用VPN/代理时显示其出口IP |
+| Chrome设备出口IP | `/extension` WebSocket的公网IP；通常看不到局域网或Tailscale私有IP |
+| `device_id`、`key_id` | 随机标识，不直接包含姓名，但可用于关联同一设备的多次活动 |
+| 调用关系 | 相同 `device_id` 使中继能够知道某个调用方正在连接哪个插件设备 |
+| 时间与流量特征 | 连接时间、在线状态、请求频率、固定长度密文和HTTP状态码 |
+| 基础网络元数据 | User-Agent、国家/地区、ASN、Cloudflare机房和TLS/连接信息可能由Cloudflare处理 |
+
+如果Python与Chrome直接使用同一个家庭或公司网络，中继通常会看到相同的公网出口IP。只让其中一端使用VPN，另一端的真实出口IP仍然可见。
+
+### 中继无法从E2EE内容中看到什么
+
+在调用方JSON和Chrome插件没有泄漏、密码学实现未被绕过的前提下，Worker不会取得以下明文：
+
+| 不可见内容 | 保护方式 |
+|---|---|
+| `symbol` | AES-256-GCM端到端加密并固定长度填充 |
+| `addPair` | 与请求正文一起端到端加密 |
+| 页面执行结果和错误详情 | 由插件加密后返回 |
+| 调用方E2EE `secret` | 只在插件端生成并写入用户导出的JSON，不发送给Worker |
+| AES/HMAC派生密钥 | 只在Python调用端和插件端派生 |
+
+部署者可以拒绝、延迟或中断请求，也可以吊销设备，但没有E2EE Secret时不能伪造通过调用方验证的加密响应。密文保护不代表匿名：调用时间和设备标识仍可能被关联分析。
+
+### 当前TT-Trigger程序记录什么
+
+为了完成认证、吊销和限流，Durable Objects会持久保存：
+
+- 随机 `device_id` 及设备Token/Grant的SHA-256哈希；
+- 随机 `key_id` 及调用方Token/Grant的SHA-256哈希；
+- 设备吊销状态；
+- 激活码哈希和有效期；
+- 每台设备的限流计数和时间窗口。
+
+这些数据不包含E2EE Secret和业务正文。吊销单个调用方时会删除对应调用方记录；吊销整台设备时会保留带有吊销标记的设备记录，以阻止其重新连接。已使用的激活码哈希会被删除；过期但未使用的激活码不能注册设备，但当前实现没有承诺固定的自动清理期限。
+
+### 当前TT-Trigger程序没有主动记录什么
+
+公开实现中没有应用级访问日志或IP数据库，`head_sampling_rate` 默认为 `0`，并且不会主动持久保存：
+
+- Python调用方或Chrome设备的完整IP地址；
+- `symbol`、`addPair`或页面执行结果；
+- 请求/响应密文正文；
+- 原始设备Token、Relay Token、Grant或E2EE Secret；
+- IP与 `device_id`、`key_id` 的历史对应关系；
+- 离线请求队列或完整调用历史。
+
+Worker在处理请求时仍会临时接触IP请求头、随机标识、认证Token/Grant和密文，以完成路由与哈希校验，但当前代码不会把它们作为上述明文日志持久化。
+
+### Cloudflare平台边界
+
+即使TT-Trigger代码不记录IP，Cloudflare作为TLS终止和Workers运行平台仍然能够处理来源IP、请求时间、路由、流量和安全事件。Cloudflare控制台可能提供聚合分析或安全事件，具体保留范围取决于Cloudflare套餐、账户设置和Cloudflare隐私政策，TT-Trigger无法提供“Cloudflare完全不留存”的保证。
+
+公共中继管理员Token只能生成激活码和吊销已知设备，不能解密E2EE正文。管理员Token、插件存储或用户导出的调用方JSON一旦泄漏，会产生不同程度的控制风险，必须分别妥善保管。
+
 示例 `symbol`：
 
 ```text
