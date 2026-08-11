@@ -150,6 +150,17 @@ python invoke-trigger.py --config C:\path\client.json --symbol "BG-P:SIREN/USDT+
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/hyc1743/TT-Trigger/tree/main/cloudflare)
 
+通过Cloudflare控制台连接整个GitHub仓库时，构建设置必须使用：
+
+```text
+Root directory: cloudflare
+Build command: npm run typecheck
+Deploy command: npx wrangler deploy
+Build output directory: 留空
+```
+
+如果Root directory仍是仓库根目录，Wrangler会误判成静态站点并报告 `Could not detect a directory containing static files`。
+
 Windows快速部署步骤：
 
 ```powershell

@@ -20,7 +20,92 @@ npm --version
 
 两个命令都能显示版本号后再继续。
 
-## 二、推荐部署：Windows引导脚本
+## 二、Cloudflare连接GitHub仓库直接部署
+
+TT-Trigger的Worker项目位于仓库的 `cloudflare/` 子目录。Cloudflare不能在仓库根目录执行默认部署，否则Wrangler找不到 `cloudflare/wrangler.toml`，会把项目误判成静态站点并显示：
+
+```text
+Could not detect a directory containing static files
+```
+
+在Cloudflare导入GitHub仓库时，构建配置必须填写：
+
+| 配置项 | 填写内容 |
+|---|---|
+| Production branch | `main` |
+| Root directory | `cloudflare` |
+| Build command | `npm run typecheck` |
+| Deploy command | `npx wrangler deploy` |
+| Build output directory | 留空 |
+
+其中最重要的是 **Root directory = `cloudflare`**。设置后，依赖安装、构建命令和部署命令都会在正确的Worker目录执行。
+
+### 已经创建了失败的部署
+
+进入Cloudflare控制台：
+
+1. 打开 **Workers & Pages**。
+2. 选择刚才连接GitHub创建的项目。
+3. 打开 **Settings → Builds → Build configuration**。
+4. 点击编辑，将 **Root directory** 改为 `cloudflare`。
+5. 将Build command改为 `npm run typecheck`。
+6. 确认Deploy command为 `npx wrangler deploy`。
+7. Build output directory保持空白。
+8. 保存后进入 **Deployments**，点击 **Retry deployment / Redeploy**。
+
+如果控制台不允许修改Root directory，就删除这次失败的Worker构建项目，重新选择 **Import a repository**，并在首次配置页面展开高级设置后填写上述内容。
+
+### 无法设置Root directory时的备用命令
+
+如果Cloudflare界面没有Root directory字段，可以继续使用仓库根目录，但把命令改为：
+
+```text
+Build command:
+cd cloudflare && npm ci && npm run typecheck
+
+Deploy command:
+cd cloudflare && npx wrangler deploy
+```
+
+两种配置只能选一种。已经设置 `Root directory = cloudflare` 时，命令中不要再执行 `cd cloudflare`。
+
+### GitHub直连部署成功后
+
+部署日志应出现类似内容：
+
+```text
+Your Worker has access to the following bindings:
+env.ENROLLMENT_REGISTRY (EnrollmentRegistry)  Durable Object
+env.DEVICE_RELAY (DeviceRelay)                Durable Object
+Deployed tt-trigger-relay
+```
+
+然后访问：
+
+```text
+https://你的Worker地址/health
+```
+
+GitHub直连不会运行本目录的 `deploy.ps1`，所以不会自动创建管理员Token。首次自用和第一个插件注册不受影响；如需生成激活码或管理员吊销设备，请在Worker的 **Settings → Variables and Secrets** 中新增一个加密Secret：
+
+```text
+Name: ADMIN_TOKEN
+Value: 至少32字节的随机Base64URL字符串
+```
+
+可以在本机PowerShell生成：
+
+```powershell
+$bytes = New-Object byte[] 32
+$rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+$rng.GetBytes($bytes)
+$rng.Dispose()
+[Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+','-').Replace('/','_')
+```
+
+保存输出值到密码管理器，并把相同值作为Cloudflare加密Secret `ADMIN_TOKEN`。不要把它配置成普通明文变量。
+
+## 三、推荐部署：Windows引导脚本
 
 ### 1. 进入部署目录
 
@@ -95,7 +180,7 @@ True tt-trigger-relay       1
 
 如果出现404，请确认使用的是Worker根地址，而不是Cloudflare控制台地址，也不要在URL后添加 `/v1` 或 `/extension`。
 
-## 三、在Chrome插件中注册第一个设备
+## 四、在Chrome插件中注册第一个设备
 
 默认配置使用 `first_device` 模式：不需要激活码，但只允许第一个设备完成注册。
 
@@ -124,7 +209,7 @@ True tt-trigger-relay       1
    python invoke-trigger.py --config C:\path\client.json --symbol BTC
    ```
 
-## 四、以后增加其他设备：激活码模式
+## 五、以后增加其他设备：激活码模式
 
 这里的“设备”指一套独立Chrome插件安装。一个设备下增加多个Python调用方不需要激活码，直接在插件中点击“新增并导出”即可。
 
@@ -170,7 +255,7 @@ npm run admin -- codes 10 3600
 
 将输出的其中一个激活码交给新设备用户。每个激活码只能成功使用一次，过期或重复使用都会被拒绝。
 
-## 五、吊销整个设备
+## 六、吊销整个设备
 
 插件弹窗中的“吊销”只吊销单个Python调用方。管理员需要封禁整个设备时，先从插件或调用方文件取得 `device_id`，然后运行：
 
@@ -182,7 +267,7 @@ npm run admin -- revoke DEVICE_ID
 
 设备被吊销后，其插件连接和所有调用方都会失效。
 
-## 六、开放注册（仅适合私有测试）
+## 七、开放注册（仅适合私有测试）
 
 如需允许任何知道Worker地址的人注册，在 `wrangler.toml` 的 `[vars]` 中增加：
 
@@ -198,7 +283,7 @@ npx wrangler deploy
 
 恢复受控注册时删除该变量并重新部署。开发者共享服务应使用 `activation_required`，不要开启开放注册。
 
-## 七、手动部署或更新
+## 八、手动部署或更新
 
 已经完成Wrangler登录和Secret设置后，日常更新只需：
 
@@ -226,7 +311,7 @@ printf 'Administrator token: %s\n' "$ADMIN_TOKEN"
 
 请立即把输出的管理员Token保存到密码管理器，然后从Shell历史和环境中清除。
 
-## 八、常见问题
+## 九、常见问题
 
 ### Wrangler登录后没有继续
 
@@ -272,7 +357,7 @@ $admin
 
 保存输出的新Token。覆盖管理员Token不会影响现有插件或调用方。
 
-## 九、免费额度相关默认值
+## 十、免费额度相关默认值
 
 - 单请求最大8KB。
 - 每设备最多20个调用方。
