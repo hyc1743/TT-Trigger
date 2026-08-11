@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "TT Trigger",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "通过 TT-Trigger 安全触发 taoli.tools 当前页面填写币种或合约地址。",
   "minimum_chrome_version": "116",
   "permissions": [

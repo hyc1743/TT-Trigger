@@ -2,7 +2,7 @@
 
 TT-Trigger 是一个 Windows x64 本地服务和 Chrome Manifest V3 插件。外部程序向服务发送经过 HMAC-SHA256 签名的 `POST /webhook` 请求后，插件会在当前 `https://taoli.tools/*` 页面填写交易对，并可选择等待 1000ms 后点击 **Add Pair / 添加交易对**。
 
-当前版本：**3.0.0**。从此版本开始，旧的 `GET /trigger?token=...` 和 Bearer Token 接口已移除。
+当前版本：**3.0.1**。从3.0开始，旧的 `GET /trigger?token=...` 和 Bearer Token 接口已移除。
 
 ## 工作方式
 
@@ -18,7 +18,7 @@ TT-Trigger 是一个 Windows x64 本地服务和 Chrome Manifest V3 插件。外
 
 ### 1. 下载并解压
 
-下载 `dist/TT-Trigger-3.0.0-windows-x64.zip`，完整解压到一个可长期保留的目录。运行时不需要安装 Go、Node.js 或 Caddy。
+下载 `dist/TT-Trigger-3.0.1-windows-x64.zip`，完整解压到一个可长期保留的目录。运行服务不需要安装 Go、Node.js 或 Caddy；只有使用Python调用示例时才需要Python 3.8+。
 
 ### 2. 启动并选择方案
 
@@ -112,6 +112,32 @@ $env:TT_HMAC_SECRET = 'config.json 中对应的 secret'
 
 `-AddPair` 未提供时只填写 symbol 并触发 Enter；提供时再等待1000ms点击 “Add Pair” 或“添加交易对”。
 
+### Python调用示例
+
+发布包同时包含只使用Python标准库的 `invoke-trigger.py`：
+
+```powershell
+$env:TT_KEY_ID = 'default'
+$env:TT_HMAC_SECRET = 'config.json 中对应的 secret'
+
+python .\invoke-trigger.py `
+  --base-url 'https://trigger.example.com' `
+  --symbol 'BG-P:SIREN/USDT+OD-S:SIREN/USDT' `
+  --add-pair
+```
+
+也可以直接传入密钥，但密钥可能被保留在命令历史中：
+
+```bash
+python invoke-trigger.py \
+  --base-url http://127.0.0.1:8788 \
+  --key-id default \
+  --secret 'YOUR_BASE64URL_SECRET' \
+  --symbol BTC
+```
+
+脚本会自动生成 `requestId`、timestamp、128位nonce，对实际发送的UTF-8 JSON字节签名，并使用系统默认CA验证HTTPS证书。默认HTTP超时为70秒，可通过 `--timeout` 修改。
+
 ## HMAC API 规范
 
 ### 请求
@@ -195,6 +221,7 @@ X-TT-Signature: 64位小写十六进制字符串
 | `configure.bat` | 停止当前进程并重新选择方案 |
 | `manage-keys.bat` | 创建、列出和吊销HMAC密钥 |
 | `invoke-trigger.ps1` | 生成签名并调用webhook |
+| `invoke-trigger.py` | 使用Python标准库生成签名并调用webhook |
 
 日志位于 `logs/`。`trigger_timeout_ms` 表示服务把触发消息发送给插件后，等待页面操作结果的最长毫秒数，允许范围250–60000。
 
@@ -226,14 +253,15 @@ X-TT-Signature: 64位小写十六进制字符串
 
 ```bash
 go test ./...
+python3 -m unittest discover -s tests -p '*_test.py'
 npm run test:extension
 npm run check:extension
-VERSION=3.0.0 ./scripts/build-release.sh
+VERSION=3.0.1 ./scripts/build-release.sh
 ```
 
 输出：
 
 ```text
-dist/TT-Trigger-3.0.0-windows-x64.zip
-dist/TT-Trigger-3.0.0-windows-x64.zip.sha256
+dist/TT-Trigger-3.0.1-windows-x64.zip
+dist/TT-Trigger-3.0.1-windows-x64.zip.sha256
 ```
