@@ -1,0 +1,16 @@
+{
+  "extension_listen": "127.0.0.1:8787",
+  "api_listen": "127.0.0.1:8788",
+  "extension_token": "replace-with-at-least-32-characters",
+  "hmac_keys": [
+    {
+      "id": "default",
+      "secret": "replace-with-32-random-bytes-as-unpadded-base64url"
+    }
+  ],
+  "signature_max_skew_seconds": 30,
+  "trigger_timeout_ms": 5000,
+  "deployment": {
+    "mode": "local_tailscale"
+  }
+}

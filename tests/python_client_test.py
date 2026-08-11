@@ -5,6 +5,7 @@ import importlib.util
 import json
 import pathlib
 import tempfile
+import time
 import unittest
 
 
@@ -82,9 +83,56 @@ class PythonClientTests(unittest.TestCase):
         self.assertEqual(CLIENT.resolve_credentials(loaded, None, None), ("default", secret))
 
         loaded["deployment"] = {"mode": "public_caddy", "domain": "trigger.example.com"}
-        self.assertEqual(CLIENT.infer_base_url(loaded), "https://trigger.example.com")
+        with self.assertRaises(ValueError):
+            CLIENT.infer_base_url(loaded)
         with self.assertRaises(ValueError):
             CLIENT.resolve_credentials(loaded, "missing", None)
+
+    def test_cloud_request_and_encrypted_response(self):
+        try:
+            from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        except ImportError:
+            self.skipTest("cryptography is not installed")
+        config = {
+            "version": 1,
+            "mode": "cloud_e2ee",
+            "relay_url": "https://relay.example.workers.dev",
+            "device_id": "MDEyMzQ1Njc4OWFiY2RlZg",
+            "key_id": "caller-1",
+            "relay_token": "r" * 43,
+            "relay_grant": "g" * 43,
+            "secret": CLIENT.base64url_encode(b"s" * 32),
+        }
+        request_id = "550e8400-e29b-41d4-a716-446655440000"
+        timestamp = int(time.time())
+        request, returned_id = CLIENT.build_cloud_request(
+            config, "BG-P:SIREN/USDT+OD-S:SIREN/USDT", True,
+            request_id=request_id, timestamp=timestamp,
+            nonce=CLIENT.base64url_encode(b"n" * 16), iv=CLIENT.base64url_encode(b"i" * 12),
+        )
+        self.assertEqual(returned_id, request_id)
+        self.assertEqual(request.full_url, f"https://relay.example.workers.dev/v1/devices/{config['device_id']}/trigger")
+        envelope = json.loads(request.data)
+        keys = CLIENT.derive_cloud_keys(config["secret"])
+        plain = AESGCM(keys["request-encryption"]).decrypt(
+            b"i" * 12,
+            CLIENT.decode_fixed_base64url(envelope["ciphertext"], CLIENT.PADDED_BYTES + 16, "ciphertext"),
+            CLIENT.e2ee_aad("REQUEST", config["device_id"], config["key_id"], request_id, str(timestamp), CLIENT.base64url_encode(b"n" * 16)),
+        )
+        self.assertEqual(CLIENT.decode_padded(plain)["symbol"], "BG-P:SIREN/USDT+OD-S:SIREN/USDT")
+
+        response_nonce = CLIENT.base64url_encode(b"o" * 16)
+        response_iv = CLIENT.base64url_encode(b"j" * 12)
+        result = {"requestId": request_id, "ok": True}
+        ciphertext = AESGCM(keys["response-encryption"]).encrypt(
+            b"j" * 12,
+            CLIENT.encode_padded(result),
+            CLIENT.e2ee_aad("RESPONSE", config["device_id"], config["key_id"], request_id, str(timestamp), response_nonce),
+        )
+        response_body = json.dumps({"v": 1, "requestId": request_id, "iv": response_iv, "ciphertext": CLIENT.base64url_encode(ciphertext)}, separators=(",", ":")).encode()
+        signature = hmac.new(keys["response-hmac"], CLIENT.e2ee_canonical("RESPONSE", config["device_id"], str(timestamp), response_nonce, response_body), hashlib.sha256).hexdigest()
+        headers = {"X-TT-Key-Id": config["key_id"], "X-TT-Timestamp": str(timestamp), "X-TT-Nonce": response_nonce, "X-TT-Signature": signature}
+        self.assertTrue(CLIENT.decrypt_cloud_response(config, request_id, headers, response_body, now=timestamp)["ok"])
 
 
 if __name__ == "__main__":

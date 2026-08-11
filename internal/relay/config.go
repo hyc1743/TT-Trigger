@@ -7,10 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/mail"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 )
 
@@ -31,8 +29,6 @@ type DeploymentConfig struct {
 	Domain    string `json:"domain,omitempty"`
 	ACMEEmail string `json:"acme_email,omitempty"`
 }
-
-var domainPattern = regexp.MustCompile(`(?i)^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$`)
 
 type Config struct {
 	ExtensionListen         string            `json:"extension_listen"`
@@ -83,6 +79,7 @@ func DefaultConfig() (Config, error) {
 		HMACKeys:                []HMACKey{{ID: "default", Secret: hmacSecret}},
 		SignatureMaxSkewSeconds: defaultSignatureMaxSkewSecs,
 		TriggerTimeoutMS:        defaultTriggerTimeoutMS,
+		Deployment:              &DeploymentConfig{Mode: "local_tailscale"},
 	}, nil
 }
 
@@ -106,6 +103,7 @@ func EnsureConfig(path string) (Config, bool, error) {
 	}
 
 	changed := cfg.normalize()
+	legacyPublicCaddy := cfg.Deployment != nil && cfg.Deployment.Mode == "public_caddy"
 	if cfg.ExtensionToken == "" && cfg.LegacyToken != "" {
 		cfg.ExtensionToken = cfg.LegacyToken
 		changed = true
@@ -139,12 +137,23 @@ func EnsureConfig(path string) (Config, bool, error) {
 			return Config{}, false, fmt.Errorf("read legacy deployment.json: %w", readErr)
 		}
 	}
+	if cfg.Deployment == nil {
+		cfg.Deployment = &DeploymentConfig{Mode: "local_tailscale"}
+		changed = true
+	}
+	if cfg.Deployment != nil && cfg.Deployment.Mode == "public_caddy" {
+		cfg.Deployment = &DeploymentConfig{Mode: "local_tailscale"}
+		legacyPublicCaddy = true
+		changed = true
+	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, false, err
 	}
 	if !created && changed {
 		backupSuffix := ".pre-3.0.bak"
-		if legacyDeploymentMigrated {
+		if legacyPublicCaddy {
+			backupSuffix = ".pre-4.0.bak"
+		} else if legacyDeploymentMigrated {
 			backupSuffix = ".pre-3.1.bak"
 		}
 		backup := path + backupSuffix
@@ -265,18 +274,8 @@ func (c Config) Validate() error {
 			if c.Deployment.Domain != "" || c.Deployment.ACMEEmail != "" {
 				return errors.New("local_tailscale deployment must not contain domain or acme_email")
 			}
-		case "public_caddy":
-			if len(c.Deployment.Domain) > 253 || !domainPattern.MatchString(c.Deployment.Domain) {
-				return errors.New("public_caddy deployment must contain a valid ASCII domain")
-			}
-			if c.Deployment.ACMEEmail != "" {
-				address, err := mail.ParseAddress(c.Deployment.ACMEEmail)
-				if err != nil || address.Address != c.Deployment.ACMEEmail {
-					return errors.New("deployment acme_email is invalid")
-				}
-			}
 		default:
-			return errors.New("deployment mode must be local_tailscale or public_caddy")
+			return errors.New("deployment mode must be local_tailscale")
 		}
 	}
 	return nil

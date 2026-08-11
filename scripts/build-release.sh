@@ -2,14 +2,16 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="${VERSION:-3.1.0}"
+VERSION="${VERSION:-4.0.0}"
 STAGE="$ROOT/dist/TT-Trigger-${VERSION}-windows-x64"
 ARCHIVE="$ROOT/dist/TT-Trigger-${VERSION}-windows-x64.zip"
+CLOUD_ARCHIVE="$ROOT/dist/TT-Trigger-${VERSION}-cloudflare.zip"
 
 command -v go >/dev/null 2>&1 || { echo "Go 1.22+ is required to build the release." >&2; exit 1; }
 command -v python3 >/dev/null 2>&1 || { echo "Python 3 is required to package the release." >&2; exit 1; }
+command -v npm >/dev/null 2>&1 || { echo "npm is required to validate the release." >&2; exit 1; }
 
-python3 - "$STAGE" "$ARCHIVE" "$ARCHIVE.sha256" <<'PY'
+python3 - "$STAGE" "$ARCHIVE" "$ARCHIVE.sha256" "$CLOUD_ARCHIVE" "$CLOUD_ARCHIVE.sha256" <<'PY'
 import pathlib
 import shutil
 import sys
@@ -26,6 +28,9 @@ mkdir -p "$STAGE/extension"
 cd "$ROOT"
 go test ./...
 python3 -m unittest discover -s tests -p '*_test.py'
+npm run check:extension
+npm run test:extension
+(cd cloudflare && npm ci && npm test && npm run typecheck)
 CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
   -trimpath \
   -ldflags "-s -w -X main.version=$VERSION" \
@@ -35,6 +40,7 @@ CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
 cp windows/start.bat windows/stop.bat windows/configure.bat windows/status.bat \
   windows/manage-keys.bat windows/tt-trigger.ps1 windows/invoke-trigger.ps1 \
   windows/invoke-trigger.py \
+  windows/install-cloud-client.bat \
   windows/config.example.json "$STAGE/"
 cp README.md "$STAGE/README.md"
 cp -R extension/. "$STAGE/extension/"
@@ -58,9 +64,27 @@ write_tree(stage / f"TT-Trigger-Chrome-{version}.zip", stage / "extension", stag
 write_tree(archive, stage, stage.parent)
 PY
 
+python3 - "$ROOT/cloudflare" "$CLOUD_ARCHIVE" <<'PY'
+import pathlib
+import sys
+import zipfile
+
+root = pathlib.Path(sys.argv[1])
+archive = pathlib.Path(sys.argv[2])
+included = ["package.json", "package-lock.json", "tsconfig.json", "wrangler.toml", "vitest.config.ts", "README.md", "deploy.ps1"]
+with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as output:
+    for name in included:
+        output.write(root / name, pathlib.Path("cloudflare") / name)
+    for directory in ["src", "scripts", "test"]:
+        for path in sorted((root / directory).rglob("*")):
+            if path.is_file(): output.write(path, pathlib.Path("cloudflare") / path.relative_to(root))
+PY
+
 (
   cd "$ROOT/dist"
   sha256sum "$(basename "$ARCHIVE")" > "$(basename "$ARCHIVE").sha256"
+  sha256sum "$(basename "$CLOUD_ARCHIVE")" > "$(basename "$CLOUD_ARCHIVE").sha256"
 )
 
 echo "Release created: $ARCHIVE"
+echo "Cloudflare package created: $CLOUD_ARCHIVE"

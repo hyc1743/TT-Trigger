@@ -1,0 +1,42 @@
+:root { color-scheme: light; font-family: "Segoe UI", "Microsoft YaHei", sans-serif; color: #111; background: #fff; }
+* { box-sizing: border-box; }
+body { margin: 0; width: 420px; max-height: 600px; overflow-y: auto; background: #fff; }
+main { border: 1px solid #111; }
+header { display: grid; grid-template-columns: 84px 1fr; border-bottom: 1px solid #111; }
+.mark { display: grid; min-height: 80px; place-items: center; color: #fff; background: #002fa7; font-size: 34px; font-weight: 750; letter-spacing: -.08em; }
+header > div:last-child { padding: 15px 17px; }
+h1 { margin: 0; font-size: 25px; line-height: 1; letter-spacing: -.04em; }
+header p, .status-panel p { margin: 7px 0 0; font-size: 12px; line-height: 1.45; }
+.status-panel { min-height: 78px; padding: 15px 17px; border-bottom: 1px solid #111; }
+.status-line { display: flex; align-items: center; gap: 9px; font-size: 17px; }
+.indicator { width: 10px; height: 10px; border: 1px solid #111; background: #fff; }
+.indicator.connected { border-color: #002fa7; background: #002fa7; }
+.mode-tabs { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid #111; }
+button { min-height: 42px; padding: 0 12px; border: 0; border-right: 1px solid #111; background: #fff; color: #111; font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+button:last-child { border-right: 0; }
+button:hover, button:focus-visible, input:focus { outline: 2px solid #002fa7; outline-offset: -3px; }
+button.primary, .mode-tabs button.active { color: #fff; background: #002fa7; }
+button:disabled { cursor: wait; opacity: .55; }
+.panel { border-bottom: 1px solid #111; }
+.panel label { display: block; padding: 10px 12px; border-bottom: 1px solid #111; font-size: 12px; font-weight: 700; }
+.panel label span { color: #666; font-weight: 400; }
+input { display: block; width: 100%; height: 42px; padding: 0 12px; border: 0; border-bottom: 1px solid #111; border-radius: 0; background: #fff; color: #111; font: 13px/1 monospace; }
+.input-action { display: grid; grid-template-columns: minmax(0, 1fr) 126px; }
+.input-action input { border-right: 1px solid #111; }
+.input-action button { border-bottom: 1px solid #111; }
+.action-row { display: grid; grid-template-columns: minmax(0, 1fr) 142px; min-height: 42px; }
+.form-status { margin: 0; padding: 11px 12px; overflow-wrap: anywhere; font-size: 11px; line-height: 1.4; }
+dl { margin: 0; }
+dl > div { display: grid; grid-template-columns: 86px 1fr; border-bottom: 1px solid #111; }
+dt, dd { margin: 0; padding: 10px 12px; font-size: 11px; }
+dt { border-right: 1px solid #111; font-weight: 700; }
+dd { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: monospace; }
+.client-form { border-top: 1px solid #111; }
+.client-list:empty::after { content: "尚未创建调用方"; display: block; padding: 12px; color: #666; font-size: 11px; }
+.client-item { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; border-top: 1px solid #111; }
+.client-item:first-child { border-top: 0; }
+.client-name { min-width: 0; padding: 11px 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.client-item button { min-height: 38px; padding: 0 9px; border-left: 1px solid #111; border-right: 0; font-size: 10px; }
+.meta { border-top: 0; }
+.reconnect { width: 100%; border-right: 0; }
+[hidden] { display: none !important; }

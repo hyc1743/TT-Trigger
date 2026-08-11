@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "TT Trigger",
-  "version": "3.1.0",
-  "description": "通过 TT-Trigger 安全触发 taoli.tools 当前页面填写币种或合约地址。",
+  "version": "4.0.0",
+  "description": "通过本地服务或云端 E2EE 中继安全触发 taoli.tools 页面填写交易对。",
   "minimum_chrome_version": "116",
   "permissions": [
     "storage",
@@ -13,6 +13,9 @@
     "https://taoli.tools/*",
     "http://127.0.0.1/*",
     "http://localhost/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
   ],
   "background": {
     "service_worker": "background.js",
@@ -35,6 +38,6 @@
     "128": "icons/icon-128.png"
   },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' ws://127.0.0.1:* ws://localhost:*"
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' ws://127.0.0.1:* ws://localhost:* https://* wss://*"
   }
 }

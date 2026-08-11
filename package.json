@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "test": "npm run check:extension && npm run test:extension",
     "test:extension": "node --test tests/extension.test.mjs",
     "check:extension": "node scripts/check-extension.mjs"
   }

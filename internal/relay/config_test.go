@@ -110,17 +110,17 @@ func TestStandaloneDeploymentMigration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !changed || migrated.Deployment == nil || migrated.Deployment.Mode != "public_caddy" || migrated.Deployment.Domain != "trigger.example.com" {
+	if !changed || migrated.Deployment == nil || migrated.Deployment.Mode != "local_tailscale" || migrated.Deployment.Domain != "" {
 		t.Fatalf("deployment was not migrated: %#v", migrated.Deployment)
 	}
 	if _, err := os.Stat(legacyPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("legacy deployment file remains: %v", err)
 	}
-	if _, err := os.Stat(path + ".pre-3.1.bak"); err != nil {
-		t.Fatal("pre-3.1 config backup missing")
+	if _, err := os.Stat(path + ".pre-4.0.bak"); err != nil {
+		t.Fatal("pre-4.0 config backup missing")
 	}
 	reloaded, err := LoadConfig(path)
-	if err != nil || reloaded.Deployment == nil || reloaded.Deployment.ACMEEmail != "admin@example.com" {
+	if err != nil || reloaded.Deployment == nil || reloaded.Deployment.Mode != "local_tailscale" {
 		t.Fatalf("integrated deployment did not reload: %#v %v", reloaded.Deployment, err)
 	}
 }
@@ -131,12 +131,9 @@ func TestDeploymentValidation(t *testing.T) {
 	if err := valid.Validate(); err != nil {
 		t.Fatalf("local deployment rejected: %v", err)
 	}
-	valid.Deployment = &DeploymentConfig{Mode: "public_caddy", Domain: "trigger.example.com", ACMEEmail: "admin@example.com"}
-	if err := valid.Validate(); err != nil {
-		t.Fatalf("public deployment rejected: %v", err)
-	}
 	for _, deployment := range []*DeploymentConfig{
 		{Mode: "unknown"},
+		{Mode: "public_caddy", Domain: "trigger.example.com"},
 		{Mode: "public_caddy", Domain: "https://example.com/"},
 		{Mode: "public_caddy", Domain: "example.com\nattack"},
 		{Mode: "public_caddy", Domain: "example.com", ACMEEmail: "a@example.com\nattack"},
@@ -147,5 +144,30 @@ func TestDeploymentValidation(t *testing.T) {
 		if err := cfg.Validate(); err == nil {
 			t.Fatalf("invalid deployment accepted: %#v", deployment)
 		}
+	}
+}
+
+func TestIntegratedPublicCaddyMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.json")
+	cfg := validTestConfig()
+	cfg.Deployment = nil
+	if err := SaveConfig(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.TrimSuffix(string(data), "\n")
+	text = strings.TrimSuffix(text, "}") + ",\n  \"deployment\": {\"mode\":\"public_caddy\",\"domain\":\"trigger.example.com\"}\n}\n"
+	if err := os.WriteFile(path, []byte(text), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	migrated, changed, err := EnsureConfig(path)
+	if err != nil || !changed || migrated.Deployment == nil || migrated.Deployment.Mode != "local_tailscale" {
+		t.Fatalf("public Caddy migration failed: %#v %v", migrated.Deployment, err)
+	}
+	if _, err := os.Stat(path + ".pre-4.0.bak"); err != nil {
+		t.Fatal("pre-4.0 backup missing")
 	}
 }

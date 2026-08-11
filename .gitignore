@@ -1,5 +1,7 @@
 config.json
 *.pre-3.0.bak
+*.pre-3.1.bak
+*.pre-4.0.bak
 tt-trigger.pid
 caddy.pid
 logs/
@@ -9,3 +11,6 @@ dist/
 *.log
 __pycache__/
 *.pyc
+node_modules/
+.dev.vars
+.tt-trigger-admin.json
