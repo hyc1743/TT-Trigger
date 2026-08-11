@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="${VERSION:-4.0.1}"
+VERSION="${VERSION:-4.0.2}"
 DIST="$ROOT/dist"
 BUILD_ROOT="$(mktemp -d)"
 WINDOWS_STAGE="$BUILD_ROOT/TT-Trigger-Windows-Local-${VERSION}"
@@ -44,6 +44,14 @@ CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
   -ldflags "-s -w -X main.version=$VERSION" \
   -o "$WINDOWS_STAGE/tt-trigger-server.exe" \
   ./cmd/tt-trigger-server
+
+if [[ -n "${WINDOWS_SIGN_PFX:-}" ]]; then
+  command -v osslsigncode >/dev/null 2>&1 || { echo "osslsigncode is required when WINDOWS_SIGN_PFX is set." >&2; exit 1; }
+  signed_exe="$WINDOWS_STAGE/tt-trigger-server.signed.exe"
+  osslsigncode sign -pkcs12 "$WINDOWS_SIGN_PFX" -pass "${WINDOWS_SIGN_PASSWORD:-}" \
+    -n "TT-Trigger" -in "$WINDOWS_STAGE/tt-trigger-server.exe" -out "$signed_exe"
+  mv "$signed_exe" "$WINDOWS_STAGE/tt-trigger-server.exe"
+fi
 
 cp windows/start.bat windows/stop.bat windows/configure.bat windows/status.bat \
   windows/manage-keys.bat windows/tt-trigger.ps1 windows/invoke-trigger.ps1 \
@@ -96,6 +104,14 @@ PY
     sha256sum "$file" > "$file.sha256"
   done
 )
+
+if [[ -n "${COSIGN_KEY:-}" ]]; then
+  command -v cosign >/dev/null 2>&1 || { echo "cosign is required when COSIGN_KEY is set." >&2; exit 1; }
+  for file in "$PYTHON_CLIENT" "$CHROME_ARCHIVE" "$WINDOWS_ARCHIVE" "$CLOUD_ARCHIVE"; do
+    cosign sign-blob --yes --key "$COSIGN_KEY" \
+      --output-signature "$file.sig" --output-certificate "$file.pem" "$file"
+  done
+fi
 
 echo "Release created with four downloads:"
 echo "  $PYTHON_CLIENT"

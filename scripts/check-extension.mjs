@@ -1,5 +1,5 @@
-import { readFile, stat } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { readFile, readdir, stat } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
 
 const root = resolve(import.meta.dirname, '..');
 const manifestPath = resolve(root, 'extension/manifest.json');
@@ -18,6 +18,15 @@ const paths = [
 
 for (const relativePath of new Set(paths)) {
   await stat(resolve(root, 'extension', relativePath));
+}
+
+for (const name of await readdir(resolve(root, 'extension'))) {
+  if (!name.endsWith('.js')) continue;
+  const modulePath = resolve(root, 'extension', name);
+  const source = await readFile(modulePath, 'utf8');
+  for (const match of source.matchAll(/(?:from\s+|import\s*)['"](\.\/[^'"]+)['"]/g)) {
+    await stat(resolve(dirname(modulePath), match[1]));
+  }
 }
 
 console.log('Chrome extension manifest and referenced assets are valid.');

@@ -6,7 +6,7 @@
 
 1. 完整解压本压缩包。
 2. 运行 `start.bat`，首次运行会生成 `config.json`。
-3. 另行下载并安装 `TT-Trigger-Chrome-4.0.1.zip`。
+3. 另行下载并安装 `TT-Trigger-Chrome-4.0.2.zip`。
 4. 打开插件，选择“本地 / Tailscale”。
 5. 将 `config.json` 中的 `extension_token` 填入插件并连接。
 
@@ -17,6 +17,9 @@ http://127.0.0.1:8788/webhook
 ```
 
 如果系统已安装并连接Tailscale，启动脚本还会自动监听检测到的Tailscale IPv4。
+请在Tailnet ACL/Grants中只允许实际调用设备访问该Windows节点的TCP 8788；不要把8788端口转发到普通LAN或公网。
+
+`manage-keys.bat` 还可轮换插件连接Token。旧格式Token会暂时兼容并在日志中告警，轮换后需要把新Token重新填入Chrome插件。
 
 ## 调用
 

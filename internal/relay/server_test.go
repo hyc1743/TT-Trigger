@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -33,12 +34,35 @@ func newTestServer(t *testing.T, timeoutMS int) (*Server, *testServers) {
 		ExtensionToken:          testExtensionToken,
 		HMACKeys:                []HMACKey{{ID: "test", Secret: base64.RawURLEncoding.EncodeToString(testHMACSecret)}},
 		SignatureMaxSkewSeconds: 30, TriggerTimeoutMS: timeoutMS,
+		WebhookRatePerMinute: 60, WebhookRateBurst: 10,
 	}, nil)
 	api := httptest.NewServer(s.APIHandler())
 	ext := httptest.NewServer(s.ExtensionHandler())
 	t.Cleanup(api.Close)
 	t.Cleanup(ext.Close)
 	return s, &testServers{URL: api.URL, ExtensionURL: ext.URL}
+}
+
+func TestWebhookRateLimitIsPerAuthenticatedKey(t *testing.T) {
+	s := NewServer(Config{
+		ExtensionListen: "127.0.0.1:0", APIListen: "127.0.0.1:0",
+		ExtensionToken:          testExtensionToken,
+		HMACKeys:                []HMACKey{{ID: "test", Secret: base64.RawURLEncoding.EncodeToString(testHMACSecret)}},
+		SignatureMaxSkewSeconds: 30, TriggerTimeoutMS: 1000,
+		WebhookRatePerMinute: 1, WebhookRateBurst: 1,
+	}, nil)
+	api := httptest.NewServer(s.APIHandler())
+	defer api.Close()
+	for index := 0; index < 3; index++ {
+		nonce := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf("rate-nonce-%06d", index)))
+		response, body := signedRequest(t, api.URL, validBody(), nonce, time.Now(), false)
+		if index < 2 && response.StatusCode != http.StatusServiceUnavailable {
+			t.Fatalf("request %d unexpectedly rejected: %d %#v", index, response.StatusCode, body)
+		}
+		if index == 2 && (response.StatusCode != http.StatusTooManyRequests || body.Code != "RATE_LIMITED") {
+			t.Fatalf("rate limit not enforced: %d %#v", response.StatusCode, body)
+		}
+	}
 }
 
 func signedRequest(t *testing.T, url, body, nonce string, at time.Time, mutateSig bool) (*http.Response, apiResponse) {
@@ -173,6 +197,26 @@ func TestLegacyEndpointsRemovedAndIsolation(t *testing.T) {
 			t.Fatalf("legacy/leaked endpoint returned %d", resp.StatusCode)
 		}
 	}
+}
+
+func TestExtensionWebSocketRejectsWebOrigins(t *testing.T) {
+	_, ts := newTestServer(t, 1000)
+	wsURL := "ws" + strings.TrimPrefix(ts.ExtensionURL, "http") + "/extension"
+	header := http.Header{"Origin": []string{"https://attacker.example"}}
+	conn, response, err := websocket.DefaultDialer.Dial(wsURL, header)
+	if conn != nil {
+		_ = conn.Close()
+		t.Fatal("web origin unexpectedly connected")
+	}
+	if err == nil || response == nil || response.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected forbidden websocket origin, response=%v err=%v", response, err)
+	}
+	extensionHeader := http.Header{"Origin": []string{"chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}
+	conn, response, err = websocket.DefaultDialer.Dial(wsURL, extensionHeader)
+	if err != nil || conn == nil || response.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("extension origin rejected, response=%v err=%v", response, err)
+	}
+	_ = conn.Close()
 }
 
 func TestWebhookTimeout(t *testing.T) {

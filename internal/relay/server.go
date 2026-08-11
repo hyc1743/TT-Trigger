@@ -15,6 +15,7 @@ import (
 	"mime"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -71,6 +72,11 @@ type pendingTrigger struct {
 	result chan wireMessage
 }
 
+type rateWindow struct {
+	start time.Time
+	count int
+}
+
 type extensionConn struct {
 	ws        *websocket.Conn
 	writeMu   sync.Mutex
@@ -109,6 +115,8 @@ type Server struct {
 
 	authMu sync.Mutex
 	nonces map[string]time.Time
+	rateMu sync.Mutex
+	rates  map[string]rateWindow
 
 	idemMu      sync.Mutex
 	idempotency map[string]*idempotencyEntry
@@ -129,11 +137,12 @@ func NewServer(cfg Config, logger *log.Logger) *Server {
 		pending:     make(map[string]pendingTrigger),
 		hmacKeys:    keys,
 		nonces:      make(map[string]time.Time),
+		rates:       make(map[string]rateWindow),
 		idempotency: make(map[string]*idempotencyEntry),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  4096,
 			WriteBufferSize: 4096,
-			CheckOrigin:     func(_ *http.Request) bool { return true },
+			CheckOrigin:     validExtensionOrigin,
 		},
 	}
 	extensionMux := http.NewServeMux()
@@ -161,6 +170,7 @@ func newHTTPServer(addr string, handler http.Handler) *http.Server {
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       10 * time.Second,
 		IdleTimeout:       60 * time.Second,
+		WriteTimeout:      65 * time.Second,
 		MaxHeaderBytes:    16 * 1024,
 	}
 }
@@ -253,6 +263,14 @@ func (s *Server) handleAPIHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
+	now := time.Now()
+	remoteHost, _, _ := net.SplitHostPort(r.RemoteAddr)
+	limit, burst := s.webhookRateConfig()
+	remoteIP := net.ParseIP(remoteHost)
+	if remoteIP != nil && !remoteIP.IsLoopback() && !s.allowRate("source:"+remoteHost, 4*(limit+burst), now) {
+		writeAPIError(w, http.StatusTooManyRequests, "RATE_LIMITED", "request rate limit exceeded", "")
+		return
+	}
 	if r.URL.RawQuery != "" {
 		writeAPIError(w, http.StatusNotFound, "NOT_FOUND", "endpoint not found", "")
 		return
@@ -274,9 +292,15 @@ func (s *Server) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	keyID, authCode := s.authenticate(r, rawBody, time.Now())
+	keyID, authCode := s.authenticate(r, rawBody, now)
 	if authCode != "" {
-		writeAPIError(w, http.StatusUnauthorized, authCode, "request authentication failed", "")
+		status := http.StatusUnauthorized
+		message := "request authentication failed"
+		if authCode == "RATE_LIMITED" {
+			status = http.StatusTooManyRequests
+			message = "request rate limit exceeded"
+		}
+		writeAPIError(w, status, authCode, message, "")
 		return
 	}
 
@@ -357,6 +381,10 @@ func (s *Server) authenticate(r *http.Request, rawBody []byte, now time.Time) (s
 	if subtle.ConstantTimeCompare(provided, expected) != 1 {
 		return "", "INVALID_SIGNATURE"
 	}
+	limit, burst := s.webhookRateConfig()
+	if !s.allowRate("key:"+keyID, limit+burst, now) {
+		return "", "RATE_LIMITED"
+	}
 
 	nonceKey := keyID + "\x00" + nonceText
 	// Keep every accepted nonce for the full possible acceptance interval. Using
@@ -376,6 +404,59 @@ func (s *Server) authenticate(r *http.Request, rawBody []byte, now time.Time) (s
 	s.nonces[nonceKey] = expires
 	s.authMu.Unlock()
 	return keyID, ""
+}
+
+func (s *Server) webhookRateConfig() (int, int) {
+	limit, burst := s.cfg.WebhookRatePerMinute, s.cfg.WebhookRateBurst
+	if limit <= 0 {
+		limit = 60
+	}
+	if burst < 0 {
+		burst = 0
+	}
+	if burst == 0 {
+		burst = 10
+	}
+	return limit, burst
+}
+
+func (s *Server) allowRate(key string, maximum int, now time.Time) bool {
+	s.rateMu.Lock()
+	defer s.rateMu.Unlock()
+	window := s.rates[key]
+	if window.start.IsZero() || now.Sub(window.start) >= time.Minute {
+		window = rateWindow{start: now}
+	}
+	if window.count >= maximum {
+		s.rates[key] = window
+		return false
+	}
+	window.count++
+	s.rates[key] = window
+	for stored, candidate := range s.rates {
+		if now.Sub(candidate.start) >= 2*time.Minute {
+			delete(s.rates, stored)
+		}
+	}
+	return true
+}
+
+func validExtensionOrigin(r *http.Request) bool {
+	origin := strings.TrimSpace(r.Header.Get("Origin"))
+	if origin == "" {
+		return true
+	} // Native diagnostics; browsers always send Origin.
+	parsed, err := url.Parse(origin)
+	host := parsed.Hostname()
+	if err != nil || parsed.Scheme != "chrome-extension" || len(host) != 32 || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
+		return false
+	}
+	for _, character := range host {
+		if character < 'a' || character > 'p' {
+			return false
+		}
+	}
+	return true
 }
 
 func singleHeader(header http.Header, name string) (string, bool) {
@@ -486,6 +567,7 @@ func validRequestID(value string) bool {
 }
 
 func (s *Server) handleExtension(w http.ResponseWriter, r *http.Request) {
+	// nosemgrep: go.gorilla.security.audit.websocket-missing-origin-check.websocket-missing-origin-check -- NewServer configures CheckOrigin to reject non-extension browser origins.
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return

@@ -13,7 +13,9 @@ let heartbeatTimer = null;
 let reconnectAttempt = 0;
 let generation = 0;
 let authRejected = false;
-let runtimeCache = { nonces: {}, responses: {} };
+let runtimeCache = { nonces: {}, responses: {}, inflight: {} };
+let runtimeCacheLoaded = false;
+let cloudTriggerQueue = Promise.resolve();
 
 let status = {
   state: 'unconfigured', mode: 'local', relayUrl: '', message: '请先配置连接方式', lastConnectedAt: null
@@ -59,7 +61,7 @@ async function restartConnection() {
       publishStatus({ state: 'unconfigured', mode: 'cloud_e2ee', relayUrl: cloud?.relayUrl || '', message: validation.ok ? '请先注册云端设备' : validation.message });
       return;
     }
-    openConnection(currentGeneration, {
+    void openConnection(currentGeneration, {
       mode: 'cloud_e2ee', relayUrl: validation.url,
       wsUrl: cloudSocketUrl(validation.url, cloud.deviceId),
       auth: { token: cloud.deviceToken, grant: cloud.deviceGrant }, cloud
@@ -72,20 +74,51 @@ async function restartConnection() {
     publishStatus({ state: 'unconfigured', mode: 'local', relayUrl: settings.relayUrl, message: validation.ok ? '请配置服务生成的插件连接 Token' : validation.message });
     return;
   }
-  openConnection(currentGeneration, {
+  void openConnection(currentGeneration, {
     mode: 'local', relayUrl: validation.url, wsUrl: validation.url,
     auth: { token: settings.token.trim() }
   });
 }
 
-function openConnection(currentGeneration, config) {
+async function requestExtensionTicket(config) {
+  try {
+    const response = await fetch(`${config.relayUrl}/v1/devices/${encodeURIComponent(config.cloud.deviceId)}/extension-ticket`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${config.cloud.deviceToken}`,
+        'x-tt-device-grant': config.cloud.deviceGrant
+      }
+    });
+    if (response.status === 404 || response.status === 405) return null;
+    if (!response.ok) throw new Error(`extension ticket HTTP ${response.status}`);
+    const value = await response.json();
+    return typeof value.ticket === 'string' && value.ticket ? value.ticket : null;
+  } catch (error) {
+    if (error instanceof TypeError) return null;
+    throw error;
+  }
+}
+
+async function openConnection(currentGeneration, config) {
   if (currentGeneration !== generation) return;
   publishStatus({ state: 'connecting', mode: config.mode, relayUrl: config.relayUrl, message: config.mode === 'local' ? '正在连接本机服务' : '正在连接云端 E2EE 中继' });
-  const ws = new WebSocket(config.wsUrl);
+  let ticket = null;
+  if (config.mode === 'cloud_e2ee') {
+    try { ticket = await requestExtensionTicket(config); }
+    catch {
+      if (currentGeneration === generation) {
+        publishStatus({ state: 'auth_error', message: '无法取得云端连接凭据' });
+        scheduleReconnect(currentGeneration, config);
+      }
+      return;
+    }
+  }
+  if (currentGeneration !== generation) return;
+  const ws = ticket ? new WebSocket(config.wsUrl, [`tt-trigger-ticket.${ticket}`]) : new WebSocket(config.wsUrl);
   socket = ws;
   ws.addEventListener('open', () => {
     if (currentGeneration !== generation || socket !== ws) return;
-    ws.send(JSON.stringify({ type: 'auth', ...config.auth }));
+    if (!ticket) ws.send(JSON.stringify({ type: 'auth', ...config.auth }));
   });
   ws.addEventListener('message', (event) => void onSocketMessage(event, ws, currentGeneration, config));
   ws.addEventListener('error', () => {
@@ -121,9 +154,14 @@ async function onSocketMessage(event, ws, currentGeneration, config) {
     return;
   }
   if (message.type !== 'trigger') return;
-  const response = config.mode === 'cloud_e2ee'
-    ? await handleCloudTrigger(message, config.cloud)
-    : await handleLocalTrigger(message);
+  let response;
+  if (config.mode === 'cloud_e2ee') {
+    const work = cloudTriggerQueue.then(() => handleCloudTrigger(message, config.cloud));
+    cloudTriggerQueue = work.catch(() => {});
+    response = await work;
+  } else {
+    response = await handleLocalTrigger(message);
+  }
   if (currentGeneration === generation && ws.readyState === WebSocket.OPEN) {
     if (config.mode === 'cloud_e2ee') ws.send(JSON.stringify({ type: 'result', id: message.id, response }));
     else ws.send(JSON.stringify({ type: 'result', id: message.id, ...response }));
@@ -136,7 +174,7 @@ function scheduleReconnect(currentGeneration, config) {
   reconnectAttempt += 1;
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
-    openConnection(currentGeneration, config);
+    void openConnection(currentGeneration, config);
   }, delay);
 }
 
@@ -167,19 +205,31 @@ async function handleLocalTrigger(message) {
 }
 
 async function loadRuntimeCache() {
-  if (!chrome.storage.session) return runtimeCache;
-  const stored = await chrome.storage.session.get({ cloudRuntimeCache: runtimeCache });
-  runtimeCache = stored.cloudRuntimeCache || runtimeCache;
+  if (runtimeCacheLoaded) return runtimeCache;
+  const stored = await chrome.storage.local.get({ cloudRuntimeCacheV2: runtimeCache });
+  const value = stored.cloudRuntimeCacheV2;
+  runtimeCache = value && typeof value === 'object' ? {
+    nonces: value.nonces && typeof value.nonces === 'object' ? value.nonces : {},
+    responses: value.responses && typeof value.responses === 'object' ? value.responses : {},
+    inflight: value.inflight && typeof value.inflight === 'object' ? value.inflight : {}
+  } : runtimeCache;
+  runtimeCacheLoaded = true;
   return runtimeCache;
 }
 
 async function saveRuntimeCache() {
-  if (chrome.storage.session) await chrome.storage.session.set({ cloudRuntimeCache: runtimeCache });
+  await chrome.storage.local.set({ cloudRuntimeCacheV2: runtimeCache });
 }
 
 function cleanRuntime(now) {
   for (const [key, value] of Object.entries(runtimeCache.nonces)) if (value <= now) delete runtimeCache.nonces[key];
   for (const [key, value] of Object.entries(runtimeCache.responses)) if (value.expiresAt <= now) delete runtimeCache.responses[key];
+  for (const [key, value] of Object.entries(runtimeCache.inflight)) if (value.expiresAt <= now) delete runtimeCache.inflight[key];
+  const entries = Object.entries(runtimeCache.responses);
+  if (entries.length > 1000) {
+    entries.sort((left, right) => left[1].expiresAt - right[1].expiresAt);
+    for (const [key] of entries.slice(0, entries.length - 1000)) delete runtimeCache.responses[key];
+  }
 }
 
 async function handleCloudTrigger(message, cloud) {
@@ -187,7 +237,8 @@ async function handleCloudTrigger(message, cloud) {
   const keyId = headers['x-tt-key-id'];
   const client = Array.isArray(cloud.clients) ? cloud.clients.find((item) => item.keyId === keyId) : null;
   if (!client || typeof message.body !== 'string') return { headers: {}, body: JSON.stringify({ ok: false, code: 'UNKNOWN_CLIENT' }) };
-  let requestId = typeof message.id === 'string' ? message.id : '';
+  let requestId = typeof message.id === 'string' && message.id.length <= 64 && /^[A-Za-z0-9_-]+$/.test(message.id.replaceAll('-', ''))
+    ? message.id : 'invalid-request';
   try {
     const verified = await verifyAndDecryptRequest({ deviceId: cloud.deviceId, client, headers, rawBody: message.body });
     requestId = verified.requestId;
@@ -197,25 +248,39 @@ async function handleCloudTrigger(message, cloud) {
     const cacheKey = `${client.keyId}:${requestId}`;
     const cached = runtimeCache.responses[cacheKey];
     if (cached) {
-      if (cached.fingerprint === verified.fingerprint) return cached.response;
+      if (cached.fingerprint === verified.fingerprint) {
+        return encryptResponse({ deviceId: cloud.deviceId, client, requestId, result: cached.result });
+      }
       return encryptResponse({ deviceId: cloud.deviceId, client, requestId, result: { ok: false, code: 'REQUEST_ID_CONFLICT', message: 'requestId 已用于其他请求' } });
+    }
+    const inflight = runtimeCache.inflight[cacheKey];
+    if (inflight) {
+      const result = inflight.fingerprint === verified.fingerprint
+        ? { ok: false, code: 'PREVIOUS_EXECUTION_INDETERMINATE', message: '此前请求可能已经执行，为避免重复操作不会再次执行' }
+        : { ok: false, code: 'REQUEST_ID_CONFLICT', message: 'requestId 已用于其他请求' };
+      return encryptResponse({ deviceId: cloud.deviceId, client, requestId, result });
     }
     const nonceKey = `${client.keyId}:${verified.nonce}`;
     if (runtimeCache.nonces[nonceKey]) {
       return encryptResponse({ deviceId: cloud.deviceId, client, requestId, result: { ok: false, code: 'REPLAYED_REQUEST', message: '请求已被使用' } });
     }
     runtimeCache.nonces[nonceKey] = now + 120_000;
+    runtimeCache.inflight[cacheKey] = { fingerprint: verified.fingerprint, expiresAt: now + IDEMPOTENCY_MS };
+    await saveRuntimeCache();
     const payload = verified.payload;
     let result;
+    const scopes = Array.isArray(client.scopes) ? client.scopes : ['fill', 'add_pair'];
     if (!payload || typeof payload.symbol !== 'string' || [...payload.symbol].length < 1 || [...payload.symbol].length > 256 || (payload.addPair !== undefined && typeof payload.addPair !== 'boolean')) {
       result = { ok: false, code: 'INVALID_PAYLOAD', message: 'symbol 必须包含 1 到 256 个字符' };
+    } else if (payload.addPair === true && !scopes.includes('add_pair')) {
+      result = { ok: false, code: 'INSUFFICIENT_SCOPE', message: '该调用方无权点击 Add Pair' };
     } else {
       result = await executePage(payload.symbol, payload.addPair === true);
     }
-    const response = await encryptResponse({ deviceId: cloud.deviceId, client, requestId, result });
-    runtimeCache.responses[cacheKey] = { fingerprint: verified.fingerprint, response, expiresAt: now + IDEMPOTENCY_MS };
+    runtimeCache.responses[cacheKey] = { fingerprint: verified.fingerprint, result, expiresAt: now + IDEMPOTENCY_MS };
+    delete runtimeCache.inflight[cacheKey];
     await saveRuntimeCache();
-    return response;
+    return encryptResponse({ deviceId: cloud.deviceId, client, requestId, result });
   } catch (error) {
     const code = typeof error?.code === 'string' ? error.code : 'INVALID_REQUEST';
     return encryptResponse({ deviceId: cloud.deviceId, client, requestId, result: { ok: false, code, message: 'E2EE 请求验证失败' } });

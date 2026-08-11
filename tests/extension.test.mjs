@@ -5,6 +5,7 @@ import { readFile } from 'node:fs/promises';
 import { fillAndSubmit } from '../extension/page-action.js';
 import { DEFAULT_CLOUD_RELAY_URL, DEFAULT_RELAY_URL, validateCloudRelayUrl, validateRelayUrl } from '../extension/settings.js';
 import { encryptResponse, protocol, verifyAndDecryptRequest } from '../extension/e2ee.js';
+import { exportDeviceBackup, importDeviceBackup } from '../extension/backup.js';
 
 test('default relay URL is accepted', () => {
   const result = validateRelayUrl(DEFAULT_RELAY_URL);
@@ -27,9 +28,17 @@ test('cloud relay requires a clean HTTPS origin', () => {
   assert.equal(validateCloudRelayUrl('https://relay.example.com/path').ok, false);
 });
 
-test('manifest grants site access to the default public relay', async () => {
+test('manifest preserves the existing public relay grant while removing global tab access', async () => {
   const manifest = JSON.parse(await readFile(new URL('../extension/manifest.json', import.meta.url), 'utf8'));
   assert.ok(manifest.host_permissions.includes('https://tt-trigger.jwyhyc.workers.dev/*'));
+  assert.ok(manifest.optional_host_permissions.includes('https://*/*'));
+  assert.ok(!manifest.permissions.includes('tabs'));
+});
+
+test('Cloudflare deployment defaults to activation-required registration with legacy rollout enabled', async () => {
+  const wrangler = await readFile(new URL('../cloudflare/wrangler.toml', import.meta.url), 'utf8');
+  assert.match(wrangler, /ENROLLMENT_MODE\s*=\s*"activation_required"/);
+  assert.match(wrangler, /ALLOW_LEGACY_WS_AUTH\s*=\s*"true"/);
 });
 
 test('cloud response ciphertext has a fixed padded length', async () => {
@@ -44,6 +53,21 @@ test('cloud response ciphertext has a fixed padded length', async () => {
   const envelope = JSON.parse(response.body);
   assert.equal(Buffer.from(envelope.ciphertext, 'base64url').length, protocol.PADDED_BYTES + 16);
   assert.match(response.headers['x-tt-signature'], /^[0-9a-f]{64}$/);
+});
+
+test('device backups are password encrypted and round-trip all credentials', async () => {
+  const cloud = {
+    registered: true,
+    relayUrl: 'https://relay.example.workers.dev',
+    deviceId: 'MDEyMzQ1Njc4OWFiY2RlZg',
+    deviceToken: 't'.repeat(43),
+    deviceGrant: 'g'.repeat(43),
+    clients: [{ keyId: 'caller-1', secret: 's'.repeat(43), scopes: ['fill'] }]
+  };
+  const backup = await exportDeviceBackup(cloud, 'correct horse battery staple');
+  assert.ok(!backup.includes(cloud.deviceToken));
+  assert.deepEqual((await importDeviceBackup(backup, 'correct horse battery staple')).cloud, cloud);
+  await assert.rejects(() => importDeviceBackup(backup, 'wrong password value'), /密码错误|损坏/);
 });
 
 test('WebCrypto decrypts the shared Python E2EE request vector', async () => {

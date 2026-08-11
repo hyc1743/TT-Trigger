@@ -14,7 +14,7 @@ TT-Trigger 可以从外部程序触发 Chrome，在当前 `https://taoli.tools/*
 >
 > **当前公共中继的TT-Trigger Worker没有应用级IP日志。** 当前公开代码没有读取或输出 `CF-Connecting-IP`，没有将Python调用端或Chrome设备的IP写入Durable Objects，`wrangler.toml` 的日志采样率为 `head_sampling_rate = 0`，也没有管理员查询历史IP的接口。因此，中继部署者不能通过当前TT-Trigger程序查看或追溯用户历史IP；但Cloudflare平台仍会在网络层处理来源IP，并可能因安全事件、账户功能或平台策略保留相关元数据。
 
-以下说明针对本仓库v4.0.1公开实现及其默认配置。中继部署者在技术上可以修改Worker代码，因此“当前未记录”不等于部署者永远没有记录能力。
+以下说明针对本仓库v4.0.2公开实现及其默认配置。中继部署者在技术上可以修改Worker代码，因此“当前未记录”不等于部署者永远没有记录能力。
 
 ### 当前中继管理员实际能从TT-Trigger看到什么
 
@@ -66,9 +66,10 @@ Cloudflare会把 `CF-Connecting-IP` 提供给Worker运行环境，但当前TT-Tr
 - 随机 `key_id` 及调用方Token/Grant的SHA-256哈希；
 - 设备吊销状态；
 - 激活码哈希和有效期；
-- 每台设备的限流计数和时间窗口。
+- 最多10分钟的注册重试摘要及最多30秒的一次性WebSocket ticket哈希；
+- 每台设备及每个调用方的限流计数和时间窗口。
 
-这些数据不包含E2EE Secret和业务正文。吊销单个调用方时会删除对应调用方记录；吊销整台设备时会保留带有吊销标记的设备记录，以阻止其重新连接。已使用的激活码哈希会被删除；过期但未使用的激活码不能注册设备，但当前实现没有承诺固定的自动清理期限。
+这些数据不包含E2EE Secret和业务正文。吊销单个调用方时会删除对应调用方记录；吊销整台设备时会保留带有吊销标记的设备记录，以阻止其重新连接。已使用的激活码哈希会立即删除；过期但未使用的激活码和过期注册重试摘要由Durable Object alarm自动清理。
 
 ### 当前TT-Trigger程序没有主动记录什么
 
@@ -113,9 +114,9 @@ BG-P:SIREN/USDT+OD-S:SIREN/USDT
 | 文件 | 内容 |
 |---|---|
 | `invoke-trigger.py` | 本地和云端共用的Python调用示例 |
-| `TT-Trigger-Chrome-4.0.1.zip` | Chrome Manifest V3插件 |
-| `TT-Trigger-Windows-Local-4.0.1.zip` | localhost/Tailscale Windows本地服务 |
-| `TT-Trigger-Cloudflare-4.0.1.zip` | Cloudflare Worker与Durable Objects自部署源码 |
+| `TT-Trigger-Chrome-4.0.2.zip` | Chrome Manifest V3插件 |
+| `TT-Trigger-Windows-Local-4.0.2.zip` | localhost/Tailscale Windows本地服务 |
+| `TT-Trigger-Cloudflare-4.0.2.zip` | Cloudflare Worker与Durable Objects自部署源码 |
 
 按使用方案下载：
 
@@ -130,10 +131,14 @@ BG-P:SIREN/USDT+OD-S:SIREN/USDT
 
 ## 安装 Chrome 插件
 
-1. 下载并解压 `TT-Trigger-Chrome-4.0.1.zip`。
+1. 下载并解压 `TT-Trigger-Chrome-4.0.2.zip`。
 2. 打开 `chrome://extensions`，启用“开发者模式”。
 3. 点击“加载已解压的扩展程序”，选择包含 `manifest.json` 的解压目录。
 4. 点击 TT Trigger 图标，在弹窗选择本地或云端模式。
+
+升级已经注册的解压版插件时，请覆盖原扩展目录中的文件并在 `chrome://extensions` 点击“重新加载”。不要删除旧扩展后从新目录加载，否则Chrome可能分配新的扩展ID，原有设备凭据不会自动迁移。
+
+云端设备面板可导出使用PBKDF2-SHA256和AES-256-GCM保护的加密设备备份。必须更换扩展目录、Chrome配置文件或电脑时，先导出备份并将备份密码单独保存，再在新扩展中导入；备份包含设备和全部调用方凭据。
 
 最低支持 Chrome 116。插件配置和E2EE密钥只存放在 `chrome.storage.local`，不会使用Chrome同步。
 
@@ -141,7 +146,7 @@ BG-P:SIREN/USDT+OD-S:SIREN/USDT
 
 ### 启动
 
-1. 下载并完整解压 `TT-Trigger-Windows-Local-4.0.1.zip`。
+1. 下载并完整解压 `TT-Trigger-Windows-Local-4.0.2.zip`。
 2. 进入解压后的目录，运行 `start.bat`。首次运行会生成唯一的 `config.json`。
 3. 另行安装Chrome插件，选择“本地 / Tailscale”。
 4. 将 `config.json` 中的 `extension_token` 填入插件，点击“保存并连接”。
@@ -160,6 +165,8 @@ http://TAILSCALE_IP:8788/webhook
 ```
 
 服务不会监听普通局域网IP或 `0.0.0.0`。未安装或未启动Tailscale不会阻止localhost模式运行。
+
+Tailscale模式仍应在Tailnet ACL/Grants中只允许实际调用设备访问目标Windows节点的TCP 8788。HMAC不能替代Tailnet的最小权限策略，也不要通过端口转发把该HTTP端口暴露到普通LAN或公网。
 
 ### Python调用
 
@@ -201,6 +208,7 @@ POST
 ```
 
 允许时间误差默认30秒；nonce只能使用一次；相同requestId和相同参数会返回缓存结果。
+每个本地HMAC key默认每分钟最多60次请求并允许10次突发；Tailscale来源还会受到独立的来源限流。可在 `config.json` 中调整 `webhook_rate_limit_per_minute` 和 `webhook_rate_limit_burst`。
 
 ### 管理
 
@@ -220,11 +228,11 @@ POST
 
 1. 在插件选择“云端 E2EE”。
 2. 插件默认填写公共中继 `https://tt-trigger.jwyhyc.workers.dev`，也可以覆盖为开发者提供或自部署的 `https://*.workers.dev` 地址。
-3. 默认公共中继和其他开发者共享中继需要一次性激活码；自部署首次设备模式可留空。
+3. 默认公共中继和自部署中继均需要一次性激活码；部署脚本会在设置管理员Secret后生成首个一小时有效的激活码。
 4. 点击“注册并连接”，按Chrome提示授予该中继Origin的访问权限。
 5. 在“新增调用方”输入名称，点击“新增并导出”，保存下载的调用方JSON。
 
-每个调用方拥有独立中继Token和独立E2EE密钥。插件支持导出、轮换和吊销；吊销会同时删除插件端解密密钥并撤销Cloudflare中继权限。
+每个调用方拥有独立中继Token和独立E2EE密钥。新调用方默认只能填写symbol，可按需勾选允许点击Add Pair。轮换会先创建并导出新凭据，再吊销旧凭据；只有界面显示“轮换完成”后旧文件才确认失效。
 
 调用方文件示例：
 
@@ -264,7 +272,7 @@ python3 invoke-trigger.py --symbol "BG-P:SIREN/USDT+OD-S:SIREN/USDT" --add-pair
 
 ### 自部署Cloudflare Worker
 
-下载 `TT-Trigger-Cloudflare-4.0.1.zip` 并解压，或者直接使用仓库中的 [`cloudflare/`](cloudflare/README.md)。完整步骤见 **[Cloudflare Relay部署指南](cloudflare/README.md)**。
+下载 `TT-Trigger-Cloudflare-4.0.2.zip` 并解压，或者直接使用仓库中的 [`cloudflare/`](cloudflare/README.md)。完整步骤见 **[Cloudflare Relay部署指南](cloudflare/README.md)**。
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/hyc1743/TT-Trigger/tree/main/cloudflare)
 
@@ -283,7 +291,7 @@ Windows快速部署步骤：
 
 ```powershell
 cd C:\你解压的位置\cloudflare
-npm install
+npm ci
 powershell -ExecutionPolicy Bypass -File .\deploy.ps1
 ```
 
@@ -298,11 +306,11 @@ powershell -ExecutionPolicy Bypass -File .\deploy.ps1
 Invoke-RestMethod https://你的Worker地址/health
 ```
 
-然后在插件中选择“云端 E2EE”，填写Worker根地址，首次自部署的激活码留空，点击“注册并连接”。默认 `first_device` 模式会在首个设备注册后关闭无激活码注册。
+部署脚本会输出Worker根地址、管理员Token和首个设备激活码。然后在插件中选择“云端 E2EE”，填写Worker根地址和该激活码，点击“注册并连接”。默认 `activation_required` 模式不会开放无激活码注册。
 
 ### 公用中继管理员设置
 
-如果中继只供自己使用，可以保留默认的 `first_device` 模式。准备让其他用户注册时，推荐使用“一台Chrome设备一个一次性激活码”的受控注册方式。
+默认始终使用“一台Chrome设备一个一次性激活码”的受控注册方式；这同样适用于仅供自己使用的中继，可避免Worker刚部署时被第三方抢先注册。
 
 #### 1. 设置管理员Token
 
@@ -312,7 +320,7 @@ Invoke-RestMethod https://你的Worker地址/health
 Workers & Pages → tt-trigger-relay → Settings → Variables and Secrets → Add
 Name: ADMIN_TOKEN
 Type: Secret（加密）
-Value: 至少32字节的随机Base64URL字符串
+Value: 恰好32字节随机数据编码成的无填充Base64URL字符串（43字符）
 ```
 
 Linux/macOS生成命令：
@@ -333,19 +341,19 @@ $rng.Dispose()
 
 把生成值同时保存到密码管理器。`ADMIN_TOKEN` 只提供给中继管理员，不要填写到Chrome插件，不要发送给普通用户，也不要写进Git仓库。
 
-#### 2. 启用激活码注册
+#### 2. 确认激活码注册
 
-将 `cloudflare/wrangler.toml` 中的注册模式改为：
+默认 `cloudflare/wrangler.toml` 已包含：
 
 ```toml
 [vars]
 ENROLLMENT_MODE = "activation_required"
 ```
 
-保留同一 `[vars]` 中的超时、限流等其他配置，然后提交到GitHub等待Cloudflare重新部署，或者在 `cloudflare` 目录手动部署：
+如果旧部署仍使用其他模式，保留同一 `[vars]` 中的超时、限流等其他配置并重新部署：
 
 ```bash
-npm install
+npm ci
 npx wrangler deploy
 ```
 
@@ -387,7 +395,7 @@ npm run admin -- codes <数量> <有效秒数>
 
 每位用户只需要获得以下内容：
 
-1. `TT-Trigger-Chrome-4.0.1.zip`；
+1. `TT-Trigger-Chrome-4.0.2.zip`；
 2. `invoke-trigger.py`；
 3. 开发者部署的Worker根地址；
 4. 一个尚未使用的一次性激活码。
@@ -413,6 +421,7 @@ npm run admin -- revoke DEVICE_ID
 - 每个调用方的32字节Secret通过HKDF-SHA256派生请求/响应各自的AES-256-GCM和HMAC-SHA256密钥。
 - `symbol`、`addPair`和执行结果先编码为“2字节长度 + JSON + 随机填充”的固定2048字节明文，再加密。
 - 请求使用 `POST JSON + timestamp + nonce + HMAC请求头`；插件在解密和操作页面前验证时间窗、HMAC、nonce和requestId。
+- 插件在执行页面操作前持久化执行中记录；无法确定前次是否完成时会拒绝重复执行，而不是再次点击Add Pair。
 - 插件正常回应时外层HTTP统一为200，真实 `{ok, code, message}` 位于加密响应内。
 - 插件离线返回503、设备忙返回429、中继等待超时返回504；密文不会离线排队或持久化。
 - 中继不记录正文、密文、Token、Grant或完整IP。
@@ -435,18 +444,20 @@ npm run test:extension
 python3 -m unittest discover -s tests -p '*_test.py'
 go test ./...
 cd cloudflare && npm ci && npm test && npm run typecheck
-VERSION=4.0.1 ./scripts/build-release.sh
+VERSION=4.0.2 ./scripts/build-release.sh
 ```
+
+正式发布时可设置 `WINDOWS_SIGN_PFX`/`WINDOWS_SIGN_PASSWORD` 让构建脚本用Authenticode证书签署EXE，并设置 `COSIGN_KEY` 为四个下载文件生成Sigstore签名和证书。SHA256文件只用于完整性校验，不能替代发布者签名。
 
 发布产物：
 
 ```text
 dist/invoke-trigger.py
 dist/invoke-trigger.py.sha256
-dist/TT-Trigger-Chrome-4.0.1.zip
-dist/TT-Trigger-Chrome-4.0.1.zip.sha256
-dist/TT-Trigger-Windows-Local-4.0.1.zip
-dist/TT-Trigger-Windows-Local-4.0.1.zip.sha256
-dist/TT-Trigger-Cloudflare-4.0.1.zip
-dist/TT-Trigger-Cloudflare-4.0.1.zip.sha256
+dist/TT-Trigger-Chrome-4.0.2.zip
+dist/TT-Trigger-Chrome-4.0.2.zip.sha256
+dist/TT-Trigger-Windows-Local-4.0.2.zip
+dist/TT-Trigger-Windows-Local-4.0.2.zip.sha256
+dist/TT-Trigger-Cloudflare-4.0.2.zip
+dist/TT-Trigger-Cloudflare-4.0.2.zip.sha256
 ```

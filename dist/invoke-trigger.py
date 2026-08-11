@@ -7,6 +7,7 @@ import argparse
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
 import pathlib
@@ -20,7 +21,7 @@ import uuid
 from typing import Optional
 
 
-VERSION = "4.0.1"
+VERSION = "4.0.2"
 DEFAULT_CONFIG = pathlib.Path(__file__).resolve().with_name("config.json")
 E2EE_PREAMBLE = "TT-TRIGGER-E2EE-V1"
 E2EE_SALT = b"TT-Trigger E2EE v1"
@@ -65,7 +66,35 @@ def webhook_url(base_url: str) -> str:
         or parsed.path not in {"", "/"}
     ):
         raise ValueError("Base URL 必须是 http(s)://主机[:端口]，不能包含路径、账号或查询参数")
+    if parsed.scheme == "http":
+        hostname = parsed.hostname.lower()
+        allowed = hostname == "localhost"
+        if not allowed:
+            try:
+                address = ipaddress.ip_address(hostname)
+                allowed = address.is_loopback or address in ipaddress.ip_network("100.64.0.0/10")
+            except ValueError:
+                allowed = False
+        if not allowed:
+            raise ValueError("HTTP仅允许localhost或Tailscale 100.64.0.0/10地址；其他主机必须使用HTTPS")
     return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, "/webhook", "", ""))
+
+
+def url_origin(value: str) -> tuple[str, str, int]:
+    parsed = urllib.parse.urlsplit(value)
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    return parsed.scheme.lower(), (parsed.hostname or "").lower(), port
+
+
+class SameOriginRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if url_origin(req.full_url) != url_origin(newurl):
+            raise ValueError("拒绝向其他Origin重定向认证请求")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def open_authenticated_request(request: urllib.request.Request, timeout: float):
+    return urllib.request.build_opener(SameOriginRedirectHandler()).open(request, timeout=timeout)
 
 
 def load_config(path: str) -> dict:
@@ -353,7 +382,7 @@ def main() -> int:
         if config.get("mode") == "cloud_e2ee":
             request, request_id = build_cloud_request(config, args.symbol, args.add_pair)
             try:
-                response = urllib.request.urlopen(request, timeout=args.timeout)
+                response = open_authenticated_request(request, timeout=args.timeout)
             except urllib.error.HTTPError as exc:
                 response = exc
             with response:
@@ -377,7 +406,7 @@ def main() -> int:
             add_pair=args.add_pair,
         )
         try:
-            response = urllib.request.urlopen(request, timeout=args.timeout)
+            response = open_authenticated_request(request, timeout=args.timeout)
         except urllib.error.HTTPError as exc:
             response = exc
         with response:

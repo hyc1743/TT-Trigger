@@ -7,7 +7,6 @@ caddy.pid
 logs/
 runtime/
 windows/tt-trigger-server.exe
-dist/
 *.log
 __pycache__/
 *.pyc

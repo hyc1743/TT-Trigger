@@ -1,4 +1,5 @@
 import { randomBase64url } from './e2ee.js';
+import { exportDeviceBackup, importDeviceBackup } from './backup.js';
 import { DEFAULT_CLOUD_RELAY_URL, loadSettings, saveCloud, validateCloudRelayUrl } from './settings.js';
 
 const $ = (selector) => document.querySelector(selector);
@@ -41,7 +42,7 @@ function renderClients() {
     name.className = 'client-name';
     name.textContent = client.name || client.keyId;
     name.title = client.keyId;
-    row.append(name, clientButton('导出', () => downloadClient(client)), clientButton('轮换', () => createClient(`${client.name || '调用方'}（轮换）`)), clientButton('吊销', () => revokeClient(client)));
+    row.append(name, clientButton('导出', () => downloadClient(client)), clientButton('轮换', () => rotateClient(client)), clientButton('吊销', () => revokeClient(client)));
     list.append(row);
   }
 }
@@ -84,7 +85,7 @@ async function relayFetch(path, options = {}) {
   return value;
 }
 
-async function createClient(name) {
+async function createClient(name, scopes = ['fill'], shouldDownload = true) {
   if (!name.trim()) throw new Error('请输入调用方名称');
   const keyId = randomBase64url(16);
   const clientToken = randomBase64url(32);
@@ -98,12 +99,13 @@ async function createClient(name) {
     },
     body: JSON.stringify({ keyId, clientToken })
   });
-  const client = { name: name.trim(), keyId, relayToken: clientToken, relayGrant: value.relayGrant, secret, createdAt: new Date().toISOString() };
+  const client = { name: name.trim(), keyId, relayToken: clientToken, relayGrant: value.relayGrant, secret, scopes, createdAt: new Date().toISOString() };
   settings.cloud.clients = [...(settings.cloud.clients || []), client];
   await saveCloud(settings.cloud);
   renderClients();
-  downloadClient(client);
+  if (shouldDownload) downloadClient(client);
   $('#cloud-status').textContent = '调用方已创建并导出';
+  return client;
 }
 
 function downloadClient(client) {
@@ -115,13 +117,24 @@ function downloadClient(client) {
     key_id: client.keyId,
     relay_token: client.relayToken,
     relay_grant: client.relayGrant,
-    secret: client.secret
+    secret: client.secret,
+    scopes: Array.isArray(client.scopes) ? client.scopes : ['fill', 'add_pair']
   };
   const blob = new Blob([`${JSON.stringify(config, null, 2)}\n`], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = `tt-trigger-${(client.name || client.keyId).replace(/[^\p{L}\p{N}._-]+/gu, '-')}.json`;
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function downloadText(text, filename) {
+  const blob = new Blob([text], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
   anchor.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
@@ -135,6 +148,28 @@ async function revokeClient(client) {
   await saveCloud(settings.cloud);
   renderClients();
   $('#cloud-status').textContent = '调用方已吊销';
+}
+
+async function rotateClient(client) {
+  const scopes = Array.isArray(client.scopes) ? client.scopes : ['fill', 'add_pair'];
+  const replacement = await createClient(`${client.name || '调用方'}（轮换）`, scopes, false);
+  downloadClient(replacement);
+  let oldRevoked = false;
+  try {
+    await relayFetch(`/v1/devices/${encodeURIComponent(settings.cloud.deviceId)}/clients/${encodeURIComponent(client.keyId)}`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${settings.cloud.deviceToken}`, 'x-tt-device-grant': settings.cloud.deviceGrant }
+    });
+    oldRevoked = true;
+    settings.cloud.clients = settings.cloud.clients.filter((item) => item.keyId !== client.keyId);
+    await saveCloud(settings.cloud);
+    renderClients();
+    $('#cloud-status').textContent = '轮换完成，旧调用方已吊销';
+  } catch (error) {
+    $('#cloud-status').textContent = oldRevoked
+      ? `旧凭据已吊销，但本地列表清理失败：${error.message}`
+      : `新调用方已导出，但旧凭据仍有效：${error.message}`;
+  }
 }
 
 chrome.runtime.onMessage.addListener((message) => { if (message?.type === 'status_changed') renderStatus(message.status); });
@@ -184,12 +219,38 @@ $('#cloud-register-form').addEventListener('submit', async (event) => {
 $('#client-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   const input = $('#client-name');
-  try { await createClient(input.value); input.value = ''; } catch (error) { $('#cloud-status').textContent = error.message; }
+  const scopes = $('#client-add-pair').checked ? ['fill', 'add_pair'] : ['fill'];
+  try { await createClient(input.value, scopes); input.value = ''; } catch (error) { $('#cloud-status').textContent = error.message; }
 });
 $('#reconnect').addEventListener('click', async (event) => {
   event.currentTarget.disabled = true;
   await reconnect();
   setTimeout(() => { event.currentTarget.disabled = false; }, 500);
+});
+$('#export-device').addEventListener('click', async () => {
+  const password = prompt('输入至少12个字符的备份密码。密码不会被保存。');
+  if (password === null) return;
+  try {
+    downloadText(await exportDeviceBackup(settings.cloud, password), `tt-trigger-device-${settings.cloud.deviceId}.backup.json`);
+    $('#cloud-status').textContent = '加密设备备份已导出';
+  } catch (error) { $('#cloud-status').textContent = error.message; }
+});
+$('#import-device').addEventListener('click', () => $('#backup-file').click());
+$('#backup-file').addEventListener('change', async (event) => {
+  const file = event.target.files?.[0];
+  event.target.value = '';
+  if (!file) return;
+  const password = prompt('输入设备备份密码。');
+  if (password === null) return;
+  try {
+    const restored = await importDeviceBackup(await file.text(), password);
+    settings.mode = restored.mode;
+    settings.cloud = restored.cloud;
+    await chrome.storage.local.set(restored);
+    renderMode();
+    await reconnect();
+    $('#cloud-status').textContent = '设备配置已恢复';
+  } catch (error) { $('#cloud-status').textContent = error.message; }
 });
 
 settings = await loadSettings();

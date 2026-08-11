@@ -9,7 +9,7 @@
 1. 一个可登录的 [Cloudflare账户](https://dash.cloudflare.com/sign-up)。免费套餐即可。
 2. Windows 10/11。
 3. 安装 [Node.js LTS](https://nodejs.org/)，建议Node.js 20或更高版本。
-4. 下载并完整解压 `TT-Trigger-Cloudflare-4.0.1.zip`，或者克隆本仓库。
+4. 下载并完整解压 `TT-Trigger-Cloudflare-4.0.2.zip`，或者克隆本仓库。
 
 打开PowerShell检查环境：
 
@@ -86,11 +86,11 @@ Deployed tt-trigger-relay
 https://你的Worker地址/health
 ```
 
-GitHub直连不会运行本目录的 `deploy.ps1`，所以不会自动创建管理员Token。首次自用和第一个插件注册不受影响；如需生成激活码或管理员吊销设备，请在Worker的 **Settings → Variables and Secrets** 中新增一个加密Secret：
+GitHub直连不会运行本目录的 `deploy.ps1`，所以不会自动创建管理员Token。默认注册模式是关闭式的 `activation_required`；注册任何设备前都必须在Worker的 **Settings → Variables and Secrets** 中新增一个加密Secret：
 
 ```text
 Name: ADMIN_TOKEN
-Value: 至少32字节的随机Base64URL字符串
+Value: 恰好32字节随机数据编码成的无填充Base64URL字符串（43字符）
 ```
 
 可以在本机PowerShell生成：
@@ -104,6 +104,8 @@ $rng.Dispose()
 ```
 
 保存输出值到密码管理器，并把相同值作为Cloudflare加密Secret `ADMIN_TOKEN`。不要把它配置成普通明文变量。
+
+随后设置 `TT_RELAY_URL`、`TT_ADMIN_TOKEN` 并运行 `npm run admin -- codes 1 3600`，使用输出的一次性激活码注册首个设备。
 
 ## 三、推荐部署：Windows引导脚本
 
@@ -126,7 +128,7 @@ cd C:\path\TT-Trigger\cloudflare
 ### 2. 安装部署工具
 
 ```powershell
-npm install
+npm ci
 ```
 
 依赖只用于部署和测试，不会安装到Chrome插件中。
@@ -144,6 +146,7 @@ powershell -ExecutionPolicy Bypass -File .\deploy.ps1
 3. 创建或更新Worker以及两个Durable Object。
 4. 将管理员Token安全写入已创建Worker的Secret。
 5. 输出Worker地址和管理员Token。
+6. 生成并输出首个设备的一次性激活码。
 
 首次登录时，浏览器授权完成后返回PowerShell等待部署结束。Cloudflare首次使用Workers时可能要求创建 `workers.dev` 子域，按页面提示确认即可。
 
@@ -182,7 +185,7 @@ True tt-trigger-relay       1
 
 ## 四、在Chrome插件中注册第一个设备
 
-默认配置使用 `first_device` 模式：不需要激活码，但只允许第一个设备完成注册。
+默认配置使用 `activation_required` 模式。Windows部署脚本会在管理员Secret设置完成后生成一个一小时有效的一次性激活码。
 
 部署成功后应立即操作：
 
@@ -192,12 +195,14 @@ True tt-trigger-relay       1
    ```text
    https://tt-trigger-relay.YOUR-SUBDOMAIN.workers.dev
    ```
-4. “激活码”留空。
+4. 填写部署脚本输出的首个设备激活码。
 5. 点击 **注册并连接**。
 6. Chrome弹出站点访问权限时点击允许。
 7. 等待插件顶部显示 **已连接**。
 
-第一个设备注册成功后，Worker会原子关闭无激活码注册。刷新插件或网络断线重连不会重复占用名额。
+激活码使用后立即失效。刷新插件或网络断线重连使用已有设备凭据，不需要新激活码。
+
+如需更换扩展目录或Chrome配置文件，请先从云端设备面板导出加密设备备份。备份使用用户提供的密码加密，并包含恢复同一注册设备所需的Token、Grant和调用方密钥。
 
 接着创建调用方：
 
@@ -217,22 +222,7 @@ True tt-trigger-relay       1
 
 如果确实需要注册第二个Chrome设备：
 
-### 1. 修改注册模式
-
-编辑 `wrangler.toml`：
-
-```toml
-[vars]
-ENROLLMENT_MODE = "activation_required"
-```
-
-保留文件中的其他变量，然后重新部署：
-
-```powershell
-npx wrangler deploy
-```
-
-### 2. 设置管理环境变量
+### 1. 设置管理环境变量
 
 使用部署脚本最后输出的管理员Token：
 
@@ -241,7 +231,7 @@ $env:TT_RELAY_URL = 'https://tt-trigger-relay.YOUR-SUBDOMAIN.workers.dev'
 $env:TT_ADMIN_TOKEN = '部署时保存的管理员Token'
 ```
 
-### 3. 生成一次性激活码
+### 2. 生成一次性激活码
 
 生成1个、24小时有效的激活码：
 
@@ -291,7 +281,7 @@ npx wrangler deploy
 
 ```powershell
 cd C:\path\TT-Trigger\cloudflare
-npm install
+npm ci
 npm test
 npm run typecheck
 npx wrangler deploy
@@ -299,16 +289,21 @@ npx wrangler deploy
 
 更新Worker不会删除已有设备、调用方或激活码。Durable Object数据独立保留。
 
+从4.0.1升级时，先部署Worker，再原目录覆盖Chrome扩展并点击“重新加载”。Worker默认兼容旧WebSocket认证，因此不需要重新注册。若旧 `ADMIN_TOKEN` 不是43字符的32字节Base64URL值，请覆盖为新随机值；这只影响管理命令，不影响设备连接。
+
 Linux/macOS也可部署：
 
 ```bash
 cd cloudflare
-npm install
+npm ci
 npx wrangler login
 npx wrangler deploy
 ADMIN_TOKEN="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
 printf '%s' "$ADMIN_TOKEN" | npx wrangler secret put ADMIN_TOKEN
 printf 'Administrator token: %s\n' "$ADMIN_TOKEN"
+export TT_RELAY_URL='https://你的Worker地址'
+export TT_ADMIN_TOKEN="$ADMIN_TOKEN"
+npm run admin -- codes 1 3600
 ```
 
 请立即把输出的管理员Token保存到密码管理器，然后从Shell历史和环境中清除。
@@ -339,9 +334,9 @@ npx wrangler whoami
 4. 插件是否已完成注册，而不是只保存了地址。
 5. Cloudflare控制台中Worker是否处于已部署状态。
 
-### 首个设备被错误占用
+### 旧扩展升级后无法连接
 
-将模式改成 `activation_required` 并重新部署，然后通过管理员CLI生成激活码。无需删除或重建Worker。
+Worker默认暂时保留 `ALLOW_LEGACY_WS_AUTH = "true"`，旧扩展仍可连接。新版扩展会自动使用一次性WebSocket ticket。确认所有扩展已更新后，可将该变量改为 `"false"` 并重新部署；这不会删除设备数据。
 
 ### 忘记管理员Token
 
@@ -361,9 +356,12 @@ $admin
 
 ## 十、免费额度相关默认值
 
+- Chrome扩展先通过已认证的 `POST /v1/devices/{deviceId}/extension-ticket` 获取30秒、一次性的WebSocket ticket；长期设备Token不会写入WebSocket URL。
+- `ALLOW_LEGACY_WS_AUTH = "true"` 仅用于旧扩展滚动升级，完成升级后可关闭。
 - 单请求最大8KB。
 - 每设备最多20个调用方。
-- 每设备每分钟60次请求，允许额外突发10次。
+- 每调用方每分钟60次请求，允许额外突发10次。
+- 每设备合计每分钟240次请求，允许额外突发40次。
 - 每设备同一时间只执行一个请求。
 - 插件响应超时为10秒。
 - 插件离线时立即返回503，不保存或排队密文。

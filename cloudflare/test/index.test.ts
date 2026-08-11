@@ -21,6 +21,15 @@ describe("TT-Trigger relay", () => {
     expect(await response.json()).toEqual({ ok: true, service: "tt-trigger-relay", version: 1 });
   });
 
+  it("rejects simple cross-origin registration content types", async () => {
+    const response = await SELF.fetch("https://relay.test/v1/register", {
+      method: "POST",
+      headers: { "content-type": "text/plain" },
+      body: JSON.stringify({ deviceId, deviceToken, deviceGrant, activationCode: "" })
+    });
+    expect(response.status).toBe(400);
+  });
+
   it("registers one device, authenticates a caller, and reports an offline extension", async () => {
     const registration = await register();
     expect(registration.response.status).toBe(200);
@@ -38,6 +47,12 @@ describe("TT-Trigger relay", () => {
     });
     expect(created.status).toBe(200);
     const relayGrant = String((await created.json<Record<string, unknown>>()).relayGrant);
+    const ticketResponse = await SELF.fetch(`https://relay.test/v1/devices/${deviceId}/extension-ticket`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${deviceToken}`, "x-tt-device-grant": deviceGrant }
+    });
+    expect(ticketResponse.status).toBe(200);
+    expect(String((await ticketResponse.json<Record<string, unknown>>()).ticket)).toMatch(/^[A-Za-z0-9_-]{43}$/);
     const response = await SELF.fetch(`https://relay.test/v1/devices/${deviceId}/trigger`, {
       method: "POST",
       headers: {
@@ -65,12 +80,19 @@ describe("TT-Trigger relay", () => {
   it("creates one-time activation codes through the administrator endpoint", async () => {
     const response = await SELF.fetch("https://relay.test/v1/admin/activation-codes", {
       method: "POST",
-      headers: { authorization: "Bearer test-admin-token", "content-type": "application/json" },
+      headers: { authorization: "Bearer AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "content-type": "application/json" },
       body: JSON.stringify({ count: 2, ttlSeconds: 600 })
     });
     expect(response.status).toBe(200);
     const value = await response.json<{ codes: string[] }>();
     expect(value.codes).toHaveLength(2);
     expect(value.codes[0]).not.toBe(value.codes[1]);
+
+    const invalid = await SELF.fetch("https://relay.test/v1/admin/activation-codes", {
+      method: "POST",
+      headers: { authorization: "Bearer short", "content-type": "application/json" },
+      body: JSON.stringify({ count: 1, ttlSeconds: 600 })
+    });
+    expect(invalid.status).toBe(401);
   });
 });

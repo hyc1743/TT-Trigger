@@ -58,6 +58,8 @@ class PythonClientTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             CLIENT.webhook_url("https://example.com/path")
         with self.assertRaises(ValueError):
+            CLIENT.webhook_url("http://192.168.1.20:8788")
+        with self.assertRaises(ValueError):
             CLIENT.build_signed_request(
                 base_url="https://example.com",
                 key_id="default",
@@ -67,6 +69,12 @@ class PythonClientTests(unittest.TestCase):
             )
         self.assertEqual(CLIENT.webhook_url("http://127.0.0.1:8788"), "http://127.0.0.1:8788/webhook")
         self.assertEqual(len(CLIENT.base64url_decode(valid_secret)), 32)
+
+    def test_rejects_cross_origin_authenticated_redirects(self):
+        request = CLIENT.urllib.request.Request("https://relay.example/trigger", method="POST")
+        handler = CLIENT.SameOriginRedirectHandler()
+        with self.assertRaisesRegex(ValueError, "Origin"):
+            handler.redirect_request(request, None, 302, "Found", {}, "https://attacker.example/steal")
 
     def test_reuses_integrated_config(self):
         secret = base64.urlsafe_b64encode(b"x" * 32).rstrip(b"=").decode()

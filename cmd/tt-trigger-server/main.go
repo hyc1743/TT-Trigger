@@ -22,6 +22,7 @@ func main() {
 	keyList := flag.Bool("key-list", false, "list configured HMAC key IDs")
 	keyAdd := flag.String("key-add", "", "create an HMAC key with this ID")
 	keyRemove := flag.String("key-remove", "", "remove the HMAC key with this ID")
+	rotateExtensionToken := flag.Bool("extension-token-rotate", false, "replace the extension connection token")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 
@@ -39,10 +40,26 @@ func main() {
 			fmt.Printf("Created or migrated %s\n", *configPath)
 			fmt.Printf("Extension token: %s\n", cfg.ExtensionToken)
 			fmt.Printf("Default HMAC key ID: %s\n", cfg.HMACKeys[0].ID)
-			fmt.Printf("Default HMAC secret: %s\n", cfg.HMACKeys[0].Secret)
+			fmt.Printf("HMAC credentials were written to %s and are not printed.\n", *configPath)
 		} else {
 			fmt.Printf("Configuration already exists: %s\n", *configPath)
 		}
+		return
+	}
+	if *rotateExtensionToken {
+		cfg, err := relay.LoadConfig(*configPath)
+		if err != nil {
+			log.Fatalf("load configuration: %v", err)
+		}
+		token, err := relay.GenerateExtensionToken()
+		if err != nil {
+			log.Fatalf("generate extension token: %v", err)
+		}
+		cfg.ExtensionToken = token
+		if err := relay.SaveConfig(*configPath, cfg); err != nil {
+			log.Fatalf("save configuration: %v", err)
+		}
+		fmt.Printf("Extension token: %s\n", token)
 		return
 	}
 
@@ -54,6 +71,9 @@ func main() {
 	cfg, err := relay.LoadConfig(*configPath)
 	if err != nil {
 		log.Fatalf("load configuration: %v", err)
+	}
+	if !relay.ExtensionTokenIsStrong(cfg.ExtensionToken) {
+		log.Printf("WARNING: legacy extension_token format is accepted for compatibility; rotate it with --extension-token-rotate")
 	}
 	if *apiListen != "" {
 		cfg.AdditionalAPIListen = *apiListen

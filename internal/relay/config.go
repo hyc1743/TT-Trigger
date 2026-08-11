@@ -17,6 +17,8 @@ const (
 	defaultAPIListen            = "127.0.0.1:8788"
 	defaultTriggerTimeoutMS     = 5000
 	defaultSignatureMaxSkewSecs = 30
+	defaultWebhookRatePerMinute = 60
+	defaultWebhookRateBurst     = 10
 )
 
 type HMACKey struct {
@@ -37,6 +39,8 @@ type Config struct {
 	HMACKeys                []HMACKey         `json:"hmac_keys"`
 	SignatureMaxSkewSeconds int               `json:"signature_max_skew_seconds"`
 	TriggerTimeoutMS        int               `json:"trigger_timeout_ms"`
+	WebhookRatePerMinute    int               `json:"webhook_rate_limit_per_minute"`
+	WebhookRateBurst        int               `json:"webhook_rate_limit_burst"`
 	Deployment              *DeploymentConfig `json:"deployment,omitempty"`
 
 	LegacyToken         string `json:"token,omitempty"`
@@ -50,6 +54,13 @@ func randomSecret() (string, error) {
 		return "", err
 	}
 	return base64.RawURLEncoding.EncodeToString(b), nil
+}
+
+func GenerateExtensionToken() (string, error) { return randomSecret() }
+
+func ExtensionTokenIsStrong(value string) bool {
+	decoded, err := base64.RawURLEncoding.DecodeString(value)
+	return err == nil && len(decoded) == 32 && base64.RawURLEncoding.EncodeToString(decoded) == value
 }
 
 func GenerateHMACKey(id string) (HMACKey, error) {
@@ -79,6 +90,8 @@ func DefaultConfig() (Config, error) {
 		HMACKeys:                []HMACKey{{ID: "default", Secret: hmacSecret}},
 		SignatureMaxSkewSeconds: defaultSignatureMaxSkewSecs,
 		TriggerTimeoutMS:        defaultTriggerTimeoutMS,
+		WebhookRatePerMinute:    defaultWebhookRatePerMinute,
+		WebhookRateBurst:        defaultWebhookRateBurst,
 		Deployment:              &DeploymentConfig{Mode: "local_tailscale"},
 	}, nil
 }
@@ -248,8 +261,8 @@ func (c Config) Validate() error {
 	if len(c.ExtensionToken) < 32 {
 		return errors.New("extension_token must contain at least 32 characters")
 	}
-	if len(c.HMACKeys) == 0 {
-		return errors.New("hmac_keys must contain at least one key")
+	if len(c.HMACKeys) == 0 || len(c.HMACKeys) > 100 {
+		return errors.New("hmac_keys must contain between 1 and 100 keys")
 	}
 	seen := make(map[string]bool, len(c.HMACKeys))
 	for _, key := range c.HMACKeys {
@@ -267,6 +280,12 @@ func (c Config) Validate() error {
 	}
 	if c.TriggerTimeoutMS < 250 || c.TriggerTimeoutMS > 60000 {
 		return errors.New("trigger_timeout_ms must be between 250 and 60000")
+	}
+	if c.WebhookRatePerMinute != 0 && (c.WebhookRatePerMinute < 1 || c.WebhookRatePerMinute > 10000) {
+		return errors.New("webhook_rate_limit_per_minute must be between 1 and 10000")
+	}
+	if c.WebhookRateBurst < 0 || c.WebhookRateBurst > 10000 {
+		return errors.New("webhook_rate_limit_burst must be between 0 and 10000")
 	}
 	if c.Deployment != nil {
 		switch c.Deployment.Mode {
@@ -326,6 +345,14 @@ func (c *Config) normalize() bool {
 	}
 	if c.TriggerTimeoutMS == 0 {
 		c.TriggerTimeoutMS = defaultTriggerTimeoutMS
+		changed = true
+	}
+	if c.WebhookRatePerMinute == 0 {
+		c.WebhookRatePerMinute = defaultWebhookRatePerMinute
+		changed = true
+	}
+	if c.WebhookRateBurst == 0 {
+		c.WebhookRateBurst = defaultWebhookRateBurst
 		changed = true
 	}
 	return changed

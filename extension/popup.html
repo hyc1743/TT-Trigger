@@ -35,9 +35,12 @@
       </form>
       <div id="cloud-device" hidden>
         <dl><div><dt>设备 ID</dt><dd id="device-id">—</dd></div></dl>
+        <div class="backup-actions"><button id="export-device" type="button">导出加密设备备份</button><button id="import-device" type="button">导入设备备份</button></div>
+        <input id="backup-file" type="file" accept="application/json,.json" hidden>
         <form id="client-form" class="client-form">
           <label for="client-name">新增调用方</label>
           <div class="input-action"><input id="client-name" maxlength="40" placeholder="例如：交易机器人"><button type="submit" class="primary">新增并导出</button></div>
+          <label class="check-row" for="client-add-pair"><input id="client-add-pair" type="checkbox"> 允许点击 Add Pair</label>
         </form>
         <div id="client-list" class="client-list"></div>
       </div>

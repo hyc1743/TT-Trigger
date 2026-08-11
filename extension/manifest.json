@@ -1,12 +1,11 @@
 {
   "manifest_version": 3,
   "name": "TT Trigger",
-  "version": "4.0.1",
+  "version": "4.0.2",
   "description": "通过本地服务或云端 E2EE 中继安全触发 taoli.tools 页面填写交易对。",
   "minimum_chrome_version": "116",
   "permissions": [
     "storage",
-    "tabs",
     "scripting"
   ],
   "host_permissions": [

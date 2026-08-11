@@ -3,10 +3,13 @@ main = "src/index.ts"
 compatibility_date = "2026-08-01"
 
 [vars]
-ENROLLMENT_MODE = "first_device"
+ENROLLMENT_MODE = "activation_required"
+ALLOW_LEGACY_WS_AUTH = "true"
 REQUEST_TIMEOUT_MS = "10000"
 RATE_LIMIT_PER_MINUTE = "60"
 RATE_LIMIT_BURST = "10"
+DEVICE_RATE_LIMIT_PER_MINUTE = "240"
+DEVICE_RATE_LIMIT_BURST = "40"
 MAX_CLIENTS_PER_DEVICE = "20"
 
 [[durable_objects.bindings]]

@@ -10,6 +10,8 @@
   ],
   "signature_max_skew_seconds": 30,
   "trigger_timeout_ms": 5000,
+  "webhook_rate_limit_per_minute": 60,
+  "webhook_rate_limit_burst": 10,
   "deployment": {
     "mode": "local_tailscale"
   }

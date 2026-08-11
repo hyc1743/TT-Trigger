@@ -14,7 +14,14 @@ function Get-LivePid {
     if (-not (Test-Path $ServerPidFile)) { return $null }
     $raw = (Get-Content $ServerPidFile -Raw).Trim()
     if ($raw -notmatch '^\d+$') { Remove-Item $ServerPidFile -Force; return $null }
-    if (-not (Get-Process -Id ([int]$raw) -ErrorAction SilentlyContinue)) { Remove-Item $ServerPidFile -Force; return $null }
+    $process = Get-CimInstance Win32_Process -Filter "ProcessId = $raw" -ErrorAction SilentlyContinue
+    if (-not $process) { Remove-Item $ServerPidFile -Force; return $null }
+    $expected = [IO.Path]::GetFullPath($ServerExe)
+    if (-not $process.ExecutablePath -or [IO.Path]::GetFullPath($process.ExecutablePath) -ne $expected) {
+        Remove-Item $ServerPidFile -Force
+        Write-Warning 'PID文件指向的不是TT-Trigger服务，已忽略。'
+        return $null
+    }
     return [int]$raw
 }
 
@@ -25,6 +32,15 @@ function Protect-Config {
             if (Test-Path $path) { & icacls.exe $path /inheritance:r /grant:r "${identity}:(F)" /grant:r 'SYSTEM:(F)' 2>$null | Out-Null }
         }
     } catch { Write-Warning '无法收紧 config.json ACL，请确认只有当前用户可以读取该文件。' }
+}
+
+function Protect-Runtime {
+    try {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+        foreach ($path in @($LogsDir, $ServerPidFile)) {
+            if (Test-Path $path) { & icacls.exe $path /inheritance:r /grant:r "${identity}:(F)" /grant:r 'SYSTEM:(F)' 2>$null | Out-Null }
+        }
+    } catch { Write-Warning '无法收紧运行文件ACL。' }
 }
 
 function Initialize-Config {
@@ -58,6 +74,7 @@ function Start-All {
     $p = Start-Process -FilePath $ServerExe -ArgumentList $arguments -WorkingDirectory $HomeDir -WindowStyle Hidden `
         -RedirectStandardOutput (Join-Path $LogsDir 'server.log') -RedirectStandardError (Join-Path $LogsDir 'server-error.log') -PassThru
     Set-Content -LiteralPath $ServerPidFile -Value $p.Id -Encoding Ascii
+    Protect-Runtime
     Start-Sleep -Milliseconds 700
     if ($p.HasExited) { throw 'TT-Trigger 启动失败，请查看 logs\server-error.log。' }
     try { Invoke-RestMethod -Uri 'http://127.0.0.1:8788/health' -TimeoutSec 3 | Out-Null } catch { throw 'localhost 健康检查失败。' }
@@ -95,11 +112,14 @@ function Manage-Keys {
     Write-Host '  1. 列出 keyId'
     Write-Host '  2. 新增 HMAC 密钥'
     Write-Host '  3. 吊销 HMAC 密钥'
-    $choice = (Read-Host '输入 1、2 或 3').Trim()
+    Write-Host '  4. 轮换插件连接 Token'
+    $choice = (Read-Host '输入 1、2、3 或 4').Trim()
     if ($choice -eq '1') { & $ServerExe --config $ConfigPath --key-list; return }
-    if ($choice -notin @('2','3')) { throw '无效选择。' }
+    if ($choice -notin @('2','3','4')) { throw '无效选择。' }
     if ($wasRunning) { Stop-All }
-    if ($choice -eq '2') {
+    if ($choice -eq '4') {
+        & $ServerExe --config $ConfigPath --extension-token-rotate
+    } elseif ($choice -eq '2') {
         $id = (Read-Host '新 keyId（字母、数字、点、下划线或连字符）').Trim()
         & $ServerExe --config $ConfigPath --key-add $id
     } else {

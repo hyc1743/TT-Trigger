@@ -118,7 +118,11 @@ export async function verifyAndDecryptRequest({ deviceId, client, headers, rawBo
     base64urlDecode(body.ciphertext, PADDED_BYTES + 16)
   ).catch(() => { throw protocolError('DECRYPTION_FAILED'); });
   const payload = decodePadded(new Uint8Array(plain));
-  return { payload, requestId: body.requestId, nonce, fingerprint: hex(await sha256(encoder.encode(rawBody))) };
+  const fingerprintValue = payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? { symbol: payload.symbol, addPair: payload.addPair === true }
+    : payload;
+  const fingerprintText = JSON.stringify(fingerprintValue) ?? 'undefined';
+  return { payload, requestId: body.requestId, nonce, fingerprint: hex(await sha256(encoder.encode(fingerprintText))) };
 }
 
 export async function encryptResponse({ deviceId, client, requestId, result, timestamp = Math.floor(Date.now() / 1000), nonce = randomBase64url(16), iv = randomBase64url(12) }) {
