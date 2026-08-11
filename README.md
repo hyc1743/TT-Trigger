@@ -10,24 +10,39 @@ TT-Trigger 可以从外部程序触发 Chrome，在当前 `https://taoli.tools/*
 ## ⚠️ 公共中继隐私政策（使用前必读）
 
 > [!IMPORTANT]
-> 插件默认填写的公共中继是 `https://tt-trigger.jwyhyc.workers.dev`。E2EE保护业务正文，但**不会隐藏网络IP、连接时间或稳定的随机设备标识**。如果不希望公共中继或Cloudflare处理这些网络元数据，请使用本地/Tailscale模式、自部署中继，或在Chrome和Python两端使用VPN/代理。
+> 插件默认填写的公共中继是 `https://tt-trigger.jwyhyc.workers.dev`。E2EE保护业务正文，但**不会阻止Cloudflare在网络层处理来源IP、连接时间或稳定的随机设备标识**。当前TT-Trigger Worker不记录IP；如果连Cloudflare平台也不希望接触真实出口IP，请使用本地/Tailscale模式，或在Chrome和Python两端使用VPN/代理。
+>
+> **当前公共中继的TT-Trigger Worker没有应用级IP日志。** 当前公开代码没有读取或输出 `CF-Connecting-IP`，没有将Python调用端或Chrome设备的IP写入Durable Objects，`wrangler.toml` 的日志采样率为 `head_sampling_rate = 0`，也没有管理员查询历史IP的接口。因此，中继部署者不能通过当前TT-Trigger程序查看或追溯用户历史IP；但Cloudflare平台仍会在网络层处理来源IP，并可能因安全事件、账户功能或平台策略保留相关元数据。
 
 以下说明针对本仓库v4.0.1公开实现及其默认配置。中继部署者在技术上可以修改Worker代码，因此“当前未记录”不等于部署者永远没有记录能力。
 
-### 中继部署者能够看到什么
+### 当前中继管理员实际能从TT-Trigger看到什么
 
-公共中继会分别接收Python调用方的HTTPS请求和Chrome插件设备的WebSocket连接。部署者和Cloudflare在网络层有能力观察：
+这里必须区分“当前TT-Trigger程序实际记录的数据”和“Cloudflare平台在网络层有能力处理的数据”。按当前公开代码和默认配置，中继管理员通过TT-Trigger管理命令、Worker应用日志或Durable Objects得到的情况如下：
 
-| 可见信息 | 说明 |
+| 信息 | 当前TT-Trigger中的实际情况 |
 |---|---|
-| Python调用方出口IP | `/trigger` 请求的公网IP；使用VPN/代理时显示其出口IP |
-| Chrome设备出口IP | `/extension` WebSocket的公网IP；通常看不到局域网或Tailscale私有IP |
-| `device_id`、`key_id` | 随机标识，不直接包含姓名，但可用于关联同一设备的多次活动 |
-| 调用关系 | 相同 `device_id` 使中继能够知道某个调用方正在连接哪个插件设备 |
-| 时间与流量特征 | 连接时间、在线状态、请求频率、固定长度密文和HTTP状态码 |
-| 基础网络元数据 | User-Agent、国家/地区、ASN、Cloudflare机房和TLS/连接信息可能由Cloudflare处理 |
+| Python调用方出口IP | **不读取、不记录，无法通过TT-Trigger查询历史IP** |
+| Chrome设备出口IP | **不读取、不记录，无法通过TT-Trigger查询历史IP** |
+| `device_id`、`key_id` | 随机标识；为了路由和认证会被处理，其中注册信息会持久保存 |
+| 在线状态 | Worker转发时可判断插件当前是否在线，但不保存完整在线历史 |
+| 请求频率 | 保存当前限流窗口的计数，不保存完整调用历史 |
+| E2EE密文 | 仅在请求转发期间临时处理，不持久保存正文 |
+| 激活与吊销状态 | 保存激活码哈希、设备/调用方认证哈希及吊销状态 |
 
-如果Python与Chrome直接使用同一个家庭或公司网络，中继通常会看到相同的公网出口IP。只让其中一端使用VPN，另一端的真实出口IP仍然可见。
+因此，**当前公共中继管理员不能从TT-Trigger看到Python调用端或Chrome设备的当前/历史出口IP**。`device_id` 和 `key_id` 是随机标识，不直接包含姓名或IP，但中继必须用它们完成设备路由和调用方认证。
+
+### IP在网络层如何处理
+
+Python的 `/trigger` HTTPS请求和Chrome插件的 `/extension` WebSocket都会先到达Cloudflare。Cloudflare基础设施因此会处理对应的公网出口IP；使用VPN或代理时，Cloudflare处理的是VPN/代理出口IP。通常不会由此得到 `192.168.x.x` 等局域网IP或Tailscale私有IP。
+
+Cloudflare会把 `CF-Connecting-IP` 提供给Worker运行环境，但当前TT-Trigger代码没有读取、输出或保存它。这意味着：
+
+- “Cloudflare在网络层接收了IP”不等于“当前中继管理员在TT-Trigger日志里看到了IP”；
+- 当前没有TT-Trigger应用日志或管理页面可以查询这些IP；
+- Cloudflare自己的安全事件、聚合分析或平台日志仍可能按账户功能和平台策略处理部分网络元数据；
+- 部署者只有在以后修改Worker代码或日志配置后，才可能通过TT-Trigger开始记录修改之后的新IP；
+- 后续开启日志不能恢复此前从未由TT-Trigger保存的历史IP。
 
 ### 中继无法从E2EE内容中看到什么
 
@@ -66,7 +81,18 @@ TT-Trigger 可以从外部程序触发 Chrome，在当前 `https://taoli.tools/*
 - IP与 `device_id`、`key_id` 的历史对应关系；
 - 离线请求队列或完整调用历史。
 
-Worker在处理请求时仍会临时接触IP请求头、随机标识、认证Token/Grant和密文，以完成路由与哈希校验，但当前代码不会把它们作为上述明文日志持久化。
+Cloudflare运行环境提供的请求对象可能包含IP请求头，但当前TT-Trigger代码不会读取该IP字段。代码只临时处理路由所需的随机标识、认证Token/Grant和密文，并且不会把它们作为上述明文日志持久化。
+
+具体而言，当前公共中继配置和代码满足以下条件：
+
+- 没有读取或输出 `CF-Connecting-IP`；
+- 没有通过 `console.log()` 记录Python调用端或Chrome设备IP；
+- 没有将IP写入Durable Objects；
+- 没有保存IP与 `device_id`、`key_id` 的历史关联；
+- 没有向管理员提供IP查询、搜索或导出接口；
+- `head_sampling_rate = 0`，不采样TT-Trigger应用的Worker可观测性日志。
+
+所以，在保持当前部署代码和配置不变的情况下，公共中继管理员无法从TT-Trigger中查询当前或历史用户IP。以后即使开始记录，也不能通过TT-Trigger恢复此前从未保存的历史IP。
 
 ### Cloudflare平台边界
 
