@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-VERSION="${VERSION:-4.0.0}"
+VERSION="${VERSION:-4.0.1}"
 DIST="$ROOT/dist"
 BUILD_ROOT="$(mktemp -d)"
 WINDOWS_STAGE="$BUILD_ROOT/TT-Trigger-Windows-Local-${VERSION}"

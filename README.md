@@ -20,9 +20,9 @@ BG-P:SIREN/USDT+OD-S:SIREN/USDT
 | 文件 | 内容 |
 |---|---|
 | `invoke-trigger.py` | 本地和云端共用的Python调用示例 |
-| `TT-Trigger-Chrome-4.0.0.zip` | Chrome Manifest V3插件 |
-| `TT-Trigger-Windows-Local-4.0.0.zip` | localhost/Tailscale Windows本地服务 |
-| `TT-Trigger-Cloudflare-4.0.0.zip` | Cloudflare Worker与Durable Objects自部署源码 |
+| `TT-Trigger-Chrome-4.0.1.zip` | Chrome Manifest V3插件 |
+| `TT-Trigger-Windows-Local-4.0.1.zip` | localhost/Tailscale Windows本地服务 |
+| `TT-Trigger-Cloudflare-4.0.1.zip` | Cloudflare Worker与Durable Objects自部署源码 |
 
 按使用方案下载：
 
@@ -37,7 +37,7 @@ BG-P:SIREN/USDT+OD-S:SIREN/USDT
 
 ## 安装 Chrome 插件
 
-1. 下载并解压 `TT-Trigger-Chrome-4.0.0.zip`。
+1. 下载并解压 `TT-Trigger-Chrome-4.0.1.zip`。
 2. 打开 `chrome://extensions`，启用“开发者模式”。
 3. 点击“加载已解压的扩展程序”，选择包含 `manifest.json` 的解压目录。
 4. 点击 TT Trigger 图标，在弹窗选择本地或云端模式。
@@ -48,7 +48,7 @@ BG-P:SIREN/USDT+OD-S:SIREN/USDT
 
 ### 启动
 
-1. 下载并完整解压 `TT-Trigger-Windows-Local-4.0.0.zip`。
+1. 下载并完整解压 `TT-Trigger-Windows-Local-4.0.1.zip`。
 2. 进入解压后的目录，运行 `start.bat`。首次运行会生成唯一的 `config.json`。
 3. 另行安装Chrome插件，选择“本地 / Tailscale”。
 4. 将 `config.json` 中的 `extension_token` 填入插件，点击“保存并连接”。
@@ -126,8 +126,8 @@ POST
 ### 连接中继
 
 1. 在插件选择“云端 E2EE”。
-2. 填写开发者提供的中继URL，或填写自部署的 `https://*.workers.dev` 地址。
-3. 开发者共享中继需要一次性激活码；自部署首次设备模式可留空。
+2. 插件默认填写公共中继 `https://tt-trigger.jwyhyc.workers.dev`，也可以覆盖为开发者提供或自部署的 `https://*.workers.dev` 地址。
+3. 默认公共中继和其他开发者共享中继需要一次性激活码；自部署首次设备模式可留空。
 4. 点击“注册并连接”，按Chrome提示授予该中继Origin的访问权限。
 5. 在“新增调用方”输入名称，点击“新增并导出”，保存下载的调用方JSON。
 
@@ -171,7 +171,7 @@ python3 invoke-trigger.py --symbol "BG-P:SIREN/USDT+OD-S:SIREN/USDT" --add-pair
 
 ### 自部署Cloudflare Worker
 
-下载 `TT-Trigger-Cloudflare-4.0.0.zip` 并解压，或者直接使用仓库中的 [`cloudflare/`](cloudflare/README.md)。完整步骤见 **[Cloudflare Relay部署指南](cloudflare/README.md)**。
+下载 `TT-Trigger-Cloudflare-4.0.1.zip` 并解压，或者直接使用仓库中的 [`cloudflare/`](cloudflare/README.md)。完整步骤见 **[Cloudflare Relay部署指南](cloudflare/README.md)**。
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/hyc1743/TT-Trigger/tree/main/cloudflare)
 
@@ -294,7 +294,7 @@ npm run admin -- codes <数量> <有效秒数>
 
 每位用户只需要获得以下内容：
 
-1. `TT-Trigger-Chrome-4.0.0.zip`；
+1. `TT-Trigger-Chrome-4.0.1.zip`；
 2. `invoke-trigger.py`；
 3. 开发者部署的Worker根地址；
 4. 一个尚未使用的一次性激活码。
@@ -342,7 +342,7 @@ npm run test:extension
 python3 -m unittest discover -s tests -p '*_test.py'
 go test ./...
 cd cloudflare && npm ci && npm test && npm run typecheck
-VERSION=4.0.0 ./scripts/build-release.sh
+VERSION=4.0.1 ./scripts/build-release.sh
 ```
 
 发布产物：
@@ -350,10 +350,10 @@ VERSION=4.0.0 ./scripts/build-release.sh
 ```text
 dist/invoke-trigger.py
 dist/invoke-trigger.py.sha256
-dist/TT-Trigger-Chrome-4.0.0.zip
-dist/TT-Trigger-Chrome-4.0.0.zip.sha256
-dist/TT-Trigger-Windows-Local-4.0.0.zip
-dist/TT-Trigger-Windows-Local-4.0.0.zip.sha256
-dist/TT-Trigger-Cloudflare-4.0.0.zip
-dist/TT-Trigger-Cloudflare-4.0.0.zip.sha256
+dist/TT-Trigger-Chrome-4.0.1.zip
+dist/TT-Trigger-Chrome-4.0.1.zip.sha256
+dist/TT-Trigger-Windows-Local-4.0.1.zip
+dist/TT-Trigger-Windows-Local-4.0.1.zip.sha256
+dist/TT-Trigger-Cloudflare-4.0.1.zip
+dist/TT-Trigger-Cloudflare-4.0.1.zip.sha256
 ```

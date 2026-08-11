@@ -20,7 +20,7 @@ import uuid
 from typing import Optional
 
 
-VERSION = "4.0.0"
+VERSION = "4.0.1"
 DEFAULT_CONFIG = pathlib.Path(__file__).resolve().with_name("config.json")
 E2EE_PREAMBLE = "TT-TRIGGER-E2EE-V1"
 E2EE_SALT = b"TT-Trigger E2EE v1"

@@ -6,7 +6,7 @@
 
 1. 完整解压本压缩包。
 2. 运行 `start.bat`，首次运行会生成 `config.json`。
-3. 另行下载并安装 `TT-Trigger-Chrome-4.0.0.zip`。
+3. 另行下载并安装 `TT-Trigger-Chrome-4.0.1.zip`。
 4. 打开插件，选择“本地 / Tailscale”。
 5. 将 `config.json` 中的 `extension_token` 填入插件并连接。
 

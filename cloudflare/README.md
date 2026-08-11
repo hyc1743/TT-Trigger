@@ -9,7 +9,7 @@
 1. 一个可登录的 [Cloudflare账户](https://dash.cloudflare.com/sign-up)。免费套餐即可。
 2. Windows 10/11。
 3. 安装 [Node.js LTS](https://nodejs.org/)，建议Node.js 20或更高版本。
-4. 下载并完整解压 `TT-Trigger-Cloudflare-4.0.0.zip`，或者克隆本仓库。
+4. 下载并完整解压 `TT-Trigger-Cloudflare-4.0.1.zip`，或者克隆本仓库。
 
 打开PowerShell检查环境：
 

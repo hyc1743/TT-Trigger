@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFile } from 'node:fs/promises';
 
 import { fillAndSubmit } from '../extension/page-action.js';
-import { DEFAULT_RELAY_URL, validateCloudRelayUrl, validateRelayUrl } from '../extension/settings.js';
+import { DEFAULT_CLOUD_RELAY_URL, DEFAULT_RELAY_URL, validateCloudRelayUrl, validateRelayUrl } from '../extension/settings.js';
 import { encryptResponse, protocol, verifyAndDecryptRequest } from '../extension/e2ee.js';
 
 test('default relay URL is accepted', () => {
@@ -20,9 +20,16 @@ test('relay URL rejects non-loopback and unexpected paths', () => {
 });
 
 test('cloud relay requires a clean HTTPS origin', () => {
+  assert.equal(DEFAULT_CLOUD_RELAY_URL, 'https://tt-trigger.jwyhyc.workers.dev');
+  assert.equal(validateCloudRelayUrl(DEFAULT_CLOUD_RELAY_URL).ok, true);
   assert.equal(validateCloudRelayUrl('https://relay.example.workers.dev').ok, true);
   assert.equal(validateCloudRelayUrl('http://relay.example.com').ok, false);
   assert.equal(validateCloudRelayUrl('https://relay.example.com/path').ok, false);
+});
+
+test('manifest grants site access to the default public relay', async () => {
+  const manifest = JSON.parse(await readFile(new URL('../extension/manifest.json', import.meta.url), 'utf8'));
+  assert.ok(manifest.host_permissions.includes('https://tt-trigger.jwyhyc.workers.dev/*'));
 });
 
 test('cloud response ciphertext has a fixed padded length', async () => {

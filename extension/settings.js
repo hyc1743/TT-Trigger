@@ -1,5 +1,5 @@
 export const DEFAULT_LOCAL_RELAY_URL = 'ws://127.0.0.1:8787/extension';
-export const DEFAULT_CLOUD_RELAY_URL = '';
+export const DEFAULT_CLOUD_RELAY_URL = 'https://tt-trigger.jwyhyc.workers.dev';
 
 export function validateLocalRelayUrl(value) {
   let url;
